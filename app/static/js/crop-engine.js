@@ -2,7 +2,7 @@
  * crop-engine.js - Core cropping functionality
  *
  * Implements image cropping, positioning, and manipulation
- * 
+ *
  * IMPORTANT: Crop rectangle logic simplified to:
  * 1. Always maintain the exact aspect ratio of the target orientation (portrait/landscape)
  * 2. Automatically adjust when viewport changes size (responsive design)
@@ -62,7 +62,7 @@ function forceImageFit() {
         return;
     }
     window._forceImageFitInProgress = true;
-    
+
     // Set viewport resizing flag to true so we know this is triggered by a viewport change
     window._viewportResizing = true;
 
@@ -268,7 +268,7 @@ function initCropRectangle(aspectRatio) {
     } else {
         // Always use the full-frame crop with proper aspect ratio
         // This ensures the crop matches the orientation dimensions
-        
+
         // Calculate crop dimensions based on aspect ratio
         if (imgWidth / imgHeight > aspectRatio) {
             // Image is wider than crop ratio - use max height
@@ -582,14 +582,14 @@ function setupCropHandlers() {
                 // Always maintain the exact aspect ratio
                 newWidth = newHeight * aspectRatio;
             }
-            
+
             // Additional check to ensure we never exceed image bounds on both dimensions
             // This is needed because fixing one dimension might cause the other to exceed bounds
             if (newWidth > imgBounds.width) {
                 newWidth = imgBounds.width;
                 newHeight = newWidth / aspectRatio;
             }
-            
+
             if (newHeight > imgBounds.height) {
                 newHeight = imgBounds.height;
                 newWidth = newHeight * aspectRatio;
@@ -668,12 +668,12 @@ function updateCropValues() {
     const { currentStage } = window.APP_STATE;
     const orientation = currentStage === 1 ? 'portrait' : 'landscape';
     const aspectRatio = getAspectRatio(orientation);
-    
+
     // Verify crop has correct aspect ratio
     const currentRatio = cropWidth / cropHeight;
     let finalWidth = cropWidth;
     let finalHeight = cropHeight;
-    
+
     // If aspect ratio doesn't match, adjust height to maintain the width
     if (Math.abs(currentRatio - aspectRatio) > 0.01) {
         console.log("Fixing crop aspect ratio:", currentRatio, "should be", aspectRatio);
@@ -714,11 +714,11 @@ function performCrop(orientation) {
     // Get the crop data for the current orientation
     let crop = orientation === 'portrait' ? window.APP_STATE.portraitCrop : window.APP_STATE.landscapeCrop;
     const currentImage = window.APP_STATE.currentImage;
-    
+
     // Double check that the crop has the correct aspect ratio
     const aspectRatio = getAspectRatio(orientation);
     const currentRatio = crop.width / crop.height;
-    
+
     // Verify if aspect ratio is not matching the expected ratio
     // Add small tolerance for floating point errors
     if (Math.abs(currentRatio - aspectRatio) > 0.01) {

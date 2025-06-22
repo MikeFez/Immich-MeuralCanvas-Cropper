@@ -306,7 +306,7 @@ window.addEventListener('resize', function() {
     if (APP_STATE.currentImage && !APP_STATE.syncing) {
         // Mark that we're doing a viewport resize
         window._viewportResizing = true;
-        
+
         // Debounce resize handling
         if (window.resizeTimer) clearTimeout(window.resizeTimer);
         window.resizeTimer = setTimeout(function() {
@@ -326,7 +326,7 @@ window.addEventListener('orientationchange', function() {
     if (APP_STATE.currentImage && !APP_STATE.syncing) {
         // Mark that we're doing a viewport resize
         window._viewportResizing = true;
-        
+
         // Add a delay to ensure orientation change is complete
         setTimeout(function() {
             forceImageFit();
