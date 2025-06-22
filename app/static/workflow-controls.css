@@ -1,0 +1,16 @@
+/* Workflow controls */
+.workflow-controls {
+    padding: 10px;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+    z-index: 100;
+    position: sticky;
+    bottom: 0;
+    background-color: white;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+    min-height: 60px;
+    flex-shrink: 0; /* Prevent shrinking */
+}

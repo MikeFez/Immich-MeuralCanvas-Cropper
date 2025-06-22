@@ -39,9 +39,10 @@ html, body, .container-fluid, .row, .col-lg-3, .sidebar {
     background-color: #333 !important;
     margin: 0 !important;
     padding: 0 !important;
-    height: calc(100vh - 200px) !important;
-    min-height: 400px !important;
+    height: calc(100vh - 250px) !important; /* Increased space for bottom controls */
+    min-height: 300px !important; /* Reduced min-height to accommodate smaller screens */
     width: 100% !important;
+    flex: 1 !important; /* Allow container to grow and shrink as needed */
 }
 
 /* Ensure image has proper positioning and sizing */
@@ -221,6 +222,7 @@ body {
     flex-direction: column !important;
     height: calc(100vh - 70px) !important;
     overflow: hidden !important;
+    min-height: 500px !important; /* Ensure minimal height for content */
 }
 
 /* Crop rectangle */
@@ -272,16 +274,18 @@ body {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 20px;
+    gap: 15px;
     width: 100%;
-    padding: 20px;
+    padding: 10px;
+    max-height: calc(100vh - 250px);
+    overflow-y: auto;
 }
 
 .frame-preview-item {
     flex: 1;
-    min-width: 300px;
-    max-width: calc(50% - 20px);
-    margin-bottom: 20px;
+    min-width: 200px; /* Reduced minimum width for smaller screens */
+    max-width: calc(50% - 15px);
+    margin-bottom: 15px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -291,15 +295,16 @@ body {
     background-color: #b08968;
     border-radius: 2px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.1);
-    padding: 15px;
+    padding: min(15px, 3vw); /* Responsive padding */
     position: relative;
     transition: transform 0.3s ease;
     display: inline-block;
     width: auto;
+    max-width: 95%;
 }
 
 .photo-frame:hover {
-    transform: translateY(-5px);
+    transform: translateY(-3px);
 }
 
 .frame-mat {
@@ -335,7 +340,7 @@ body {
 }
 
 #portrait-preview .frame-mat img {
-    max-height: 400px;
+    max-height: min(400px, calc(100vh - 300px)); /* Dynamically adjust based on viewport height */
     width: auto;
     height: auto;
     display: block;
@@ -344,7 +349,7 @@ body {
 /* Landscape-specific styles */
 #landscape-preview .frame-mat img {
     max-width: 100%;
-    max-height: 400px;
+    max-height: min(400px, calc(100vh - 300px)); /* Dynamically adjust based on viewport height */
     display: block;
 }
 
@@ -387,18 +392,19 @@ body {
 
 /* Workflow controls */
 .workflow-controls {
-    padding: 10px 0;
+    padding: 10px;
     display: flex;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 8px;
     width: 100%;
-    flex-shrink: 0;
-    margin-top: 10px;
-    position: relative;
+    z-index: 100;
+    position: sticky;
     bottom: 0;
-    left: 0;
-    z-index: 10;
+    background-color: white;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+    min-height: 60px;
+    flex-shrink: 0; /* Prevent shrinking */
 }
 
 /* Stage indicator */
@@ -798,6 +804,7 @@ body.has-image #no-image-view {
 @media (max-width: 768px) {
     .frame-preview-container {
         flex-direction: column;
+        max-height: calc(100vh - 220px); /* Reduced height for preview container */
     }
 
     .frame-preview-item {
@@ -817,7 +824,18 @@ body.has-image #no-image-view {
     }
 
     .editor-container {
-        height: calc(100vh - 280px) !important;
+        height: calc(100vh - 240px) !important; /* Reduced height to ensure buttons are visible */
+        min-height: 250px !important;
+    }
+
+    /* Ensure workflow controls stay visible */
+    .workflow-controls {
+        position: sticky;
+        bottom: 0;
+        background: white;
+        padding: 8px;
+        z-index: 100;
+        box-shadow: 0 -3px 10px rgba(0,0,0,0.1);
     }
 }
 
@@ -862,7 +880,12 @@ body.has-image #no-image-view {
     }
 
     .workflow-controls {
-        padding: 5px 0;
+        padding: 5px 10px;
+        position: sticky;
+        bottom: 0;
+        background: white;
+        z-index: 100;
+        box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
     }
 
     .btn-meural {
@@ -878,6 +901,22 @@ body.has-image #no-image-view {
 
     .stage-label {
         font-size: 0.75rem;
+    }
+
+    .editor-container {
+        height: calc(100vh - 220px) !important; /* Reduce height for smaller screens */
+        min-height: 220px !important;
+    }
+
+    /* Reduce the preview height */
+    .frame-preview-container {
+        max-height: calc(100vh - 200px);
+    }
+
+    /* Make images in preview smaller */
+    #portrait-preview .frame-mat img,
+    #landscape-preview .frame-mat img {
+        max-height: 300px;
     }
 }
 
