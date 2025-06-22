@@ -255,10 +255,21 @@ function selectImage(identifier) {
     isSelectingImage = true;
 
     try {
-        // Reset state
+        // Reset state and clear UI
         window.APP_STATE.currentStage = 1;
         window.APP_STATE.portraitCrop = { x: 0, y: 0, width: 0, height: 0 };
         window.APP_STATE.landscapeCrop = { x: 0, y: 0, width: 0, height: 0 };
+        
+        // Explicitly reset the view when switching images
+        if (window.ELEMENTS.previewViewEl) {
+            window.ELEMENTS.previewViewEl.style.display = 'none';
+        }
+        if (window.ELEMENTS.cropOverlayEl) {
+            window.ELEMENTS.cropOverlayEl.style.display = 'none';
+        }
+        if (window.ELEMENTS.cropRectangleEl) {
+            window.ELEMENTS.cropRectangleEl.style.display = 'none';
+        }
 
         // Update selection in both list and grid views
         document.querySelectorAll('.image-list-item, .image-grid-item').forEach(item => {
@@ -386,11 +397,19 @@ function loadImageAndInitCrop(identifier) {
 
         console.log("Setting image size to:", newWidth, newHeight);
 
-        // Update UI
+        // Update UI - ensure we're in the correct state for a new image
         previewViewEl.style.display = 'none';
         btnCropEl.style.display = 'block';
         btnSaveEl.style.display = 'none';
         btnSkipEl.style.display = 'block';
+        
+        // Reset crop elements when loading a new image
+        if (window.ELEMENTS.cropOverlayEl) {
+            window.ELEMENTS.cropOverlayEl.style.display = 'none'; // Will be shown after updateStage
+        }
+        if (window.ELEMENTS.cropRectangleEl) {
+            window.ELEMENTS.cropRectangleEl.style.display = 'none'; // Will be shown after updateStage
+        }
 
         // Store image dimensions for crop calculations
         const imgRect = currentImageEl.getBoundingClientRect();

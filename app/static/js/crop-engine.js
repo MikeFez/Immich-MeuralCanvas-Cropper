@@ -149,14 +149,26 @@ function forceImageFit() {
 
                 // Reinitialize the crop rectangle if needed, but only if we're not already inside
                 // the initCropRectangle function (to prevent recursion and shrinkage)
-                if (window.ELEMENTS.cropRectangleEl &&
-                    window.ELEMENTS.cropRectangleEl.style.display !== 'none' &&
-                    !window._initializingCropRectangle) {
+                if (window.ELEMENTS.cropRectangleEl && !window._initializingCropRectangle) {
                     const { currentStage } = window.APP_STATE;
+                    // Only initialize crop rectangle if we're in stage 1 or 2 (not in review stage)
                     if (currentStage === 1) {
+                        // Make sure elements are visible in portrait stage
+                        window.ELEMENTS.cropOverlayEl.style.display = 'block';
+                        window.ELEMENTS.cropRectangleEl.style.display = 'block';
+                        window.ELEMENTS.previewViewEl.style.display = 'none';
                         initCropRectangle(getAspectRatio('portrait')); // Portrait ratio
                     } else if (currentStage === 2) {
+                        // Make sure elements are visible in landscape stage
+                        window.ELEMENTS.cropOverlayEl.style.display = 'block';
+                        window.ELEMENTS.cropRectangleEl.style.display = 'block';
+                        window.ELEMENTS.previewViewEl.style.display = 'none';
                         initCropRectangle(getAspectRatio('landscape')); // Landscape ratio
+                    } else if (currentStage === 3) {
+                        // In review stage - hide crop elements and show preview
+                        window.ELEMENTS.cropOverlayEl.style.display = 'none';
+                        window.ELEMENTS.cropRectangleEl.style.display = 'none';
+                        window.ELEMENTS.previewViewEl.style.display = 'block';
                     }
                 }
             }

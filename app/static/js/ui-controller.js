@@ -140,13 +140,23 @@ function updateStage() {
     // Only show/hide views during stage updates if not syncing and in edit mode
     if (!APP_STATE.syncing && APP_STATE.currentImage) {
         if (currentStage === 3) {
-            // Review stage - show preview
+            // Review stage - show preview, hide crop tools
             previewViewEl.style.display = 'block';
             cropOverlayEl.style.display = 'none';
             cropRectangleEl.style.display = 'none';
+            
+            // Make sure crop button is hidden and save button is shown
+            if (ELEMENTS.btnCropEl) ELEMENTS.btnCropEl.style.display = 'none';
+            if (ELEMENTS.btnSaveEl) ELEMENTS.btnSaveEl.style.display = 'block';
+            if (ELEMENTS.btnSkipEl) ELEMENTS.btnSkipEl.style.display = 'none';
         } else {
-            // Editing stages
+            // Editing stages (1 or 2) - hide preview, show crop tools
             previewViewEl.style.display = 'none';
+            
+            // Make sure crop button is shown and save button is hidden
+            if (ELEMENTS.btnCropEl) ELEMENTS.btnCropEl.style.display = 'block';
+            if (ELEMENTS.btnSaveEl) ELEMENTS.btnSaveEl.style.display = 'none';
+            if (ELEMENTS.btnSkipEl) ELEMENTS.btnSkipEl.style.display = 'block';
 
             // Ensure crop tools are visible during editing stages
             requestAnimationFrame(() => {
