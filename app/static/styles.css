@@ -223,6 +223,7 @@ body {
     height: calc(100vh - 70px) !important;
     overflow: hidden !important;
     min-height: 500px !important; /* Ensure minimal height for content */
+    position: relative; /* Ensure proper positioning */
 }
 
 /* Crop rectangle */
@@ -531,12 +532,28 @@ body {
     min-height: 400px;
     text-align: center;
     color: #6c757d;
+    padding: 20px;
+    max-width: 600px;
+    margin: 0 auto;
 }
 
 .no-image-icon {
-    font-size: 5rem;
+    font-size: 6rem;
     margin-bottom: 1.5rem;
-    color: #dee2e6;
+    color: var(--primary-color);
+    opacity: 0.8;
+    background-color: rgba(58, 90, 64, 0.1);
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.3s ease;
+}
+
+.no-image-icon:hover {
+    transform: scale(1.05);
 }
 
 /* Meural Device Dialog Styles */
@@ -772,7 +789,13 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    z-index: 1; /* Lower z-index to appear behind */
+    z-index: 3; /* Higher z-index to ensure it's shown on top */
+    pointer-events: none; /* Allow clicks to pass through to sidebar */
+    display: block; /* Show by default */
+}
+
+.no-image-container {
+    pointer-events: auto; /* Restore pointer events for the content */
 }
 
 /* Prevent views from showing simultaneously */
@@ -949,5 +972,39 @@ body.has-image #no-image-view {
     .btn-meural {
         padding: 2px 8px;
         font-size: 0.8rem;
+    }
+}
+/* Landing page enhancements */
+.no-image-container h3 {
+    margin-bottom: 20px;
+    color: var(--dark-color);
+    font-weight: 500;
+}
+
+.no-image-container p {
+    margin-bottom: 15px;
+    max-width: 450px;
+}
+
+/* Responsive adjustments for landing page */
+@media (max-width: 768px) {
+    .no-image-icon {
+        font-size: 4rem;
+        width: 120px;
+        height: 120px;
+        margin-bottom: 1rem;
+    }    .no-image-container h3 {
+        font-size: 1.5rem;
+        margin-bottom: 15px;
+    }
+
+    .no-image-container {
+        min-height: 300px;
+        padding: 10px;
+    }
+
+    .no-image-container p {
+        font-size: 0.9rem;
+        max-width: 100%;
     }
 }

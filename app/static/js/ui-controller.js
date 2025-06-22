@@ -13,6 +13,21 @@ function ensureElementsInitialized() {
     if (!window.ELEMENTS.imageGridEl) {
         window.ELEMENTS.imageGridEl = document.getElementById('image-grid');
     }
+    if (!window.ELEMENTS.editorViewEl) {
+        window.ELEMENTS.editorViewEl = document.getElementById('editor-view');
+    }
+    if (!window.ELEMENTS.noImageViewEl) {
+        window.ELEMENTS.noImageViewEl = document.getElementById('no-image-view');
+    }
+    if (!window.ELEMENTS.previewViewEl) {
+        window.ELEMENTS.previewViewEl = document.getElementById('preview-view');
+    }
+    if (!window.ELEMENTS.cropOverlayEl) {
+        window.ELEMENTS.cropOverlayEl = document.getElementById('crop-overlay');
+    }
+    if (!window.ELEMENTS.cropRectangleEl) {
+        window.ELEMENTS.cropRectangleEl = document.getElementById('crop-rectangle');
+    }
 }
 
 function updateStage() {
@@ -198,6 +213,13 @@ let isViewTransitioning = false;
  * @param {string} viewName - 'editor-view' or 'no-image-view'
  */
 function showView(viewName) {
+    console.log('showView called with:', viewName, {
+        currentImage: APP_STATE.currentImage ? 'exists' : 'null',
+        syncing: APP_STATE.syncing,
+        transitioning: isViewTransitioning,
+        timestamp: new Date().toISOString()
+    });
+
     // Prevent view changes during operations
     if (APP_STATE.syncing || isViewTransitioning) {
         console.log('View change blocked:', {
@@ -262,7 +284,7 @@ function showView(viewName) {
                     ELEMENTS.cropRectangleEl.style.display = 'none';
                     ELEMENTS.previewViewEl.style.display = 'none';
 
-                    // Show no-image view
+                    // Show landing page (no-image view) while keeping sidebar visible
                     ELEMENTS.noImageViewEl.style.display = 'block';
                     document.body.classList.remove('has-image');
                 }
@@ -272,6 +294,23 @@ function showView(viewName) {
     } catch (error) {
         console.error('Error during view transition:', error);
         isViewTransitioning = false;
+
+        // Fallback to show landing page in case of errors
+        if (viewName === 'no-image-view' || !APP_STATE.currentImage) {
+            if (ELEMENTS.noImageViewEl) {
+                ELEMENTS.noImageViewEl.style.display = 'block';
+            } else {
+                document.getElementById('no-image-view').style.display = 'block';
+            }
+
+            if (ELEMENTS.editorViewEl) {
+                ELEMENTS.editorViewEl.style.display = 'none';
+            } else {
+                document.getElementById('editor-view').style.display = 'none';
+            }
+
+            document.body.classList.remove('has-image');
+        }
     }
 }
 
@@ -304,6 +343,7 @@ function addLoadingIndicatorStyles() {
 
 // Ensure preview elements are initialized on load
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOMContentLoaded from ui-controller.js');
     ensureElementsInitialized();
     addLoadingIndicatorStyles();
 
@@ -311,6 +351,26 @@ document.addEventListener('DOMContentLoaded', function() {
     const imageGridEl = document.getElementById('image-grid');
     if (imageGridEl) {
         imageGridEl.style.display = 'grid';
+    }
+
+    // Force the correct view without using showView to avoid any issues with initialization timing
+    if (!window.APP_STATE || !window.APP_STATE.currentImage) {
+        console.log('Forcing no-image-view to display in DOMContentLoaded');
+        const noImageViewEl = document.getElementById('no-image-view');
+        const editorViewEl = document.getElementById('editor-view');
+
+        if (noImageViewEl) {
+            noImageViewEl.style.display = 'block';
+        }
+        if (editorViewEl) {
+            editorViewEl.style.display = 'none';
+        }
+
+        // Using setTimeout to ensure this happens after other initialization
+        setTimeout(() => {
+            document.getElementById('no-image-view').style.display = 'block';
+            document.getElementById('editor-view').style.display = 'none';
+        }, 100);
     }
 });
 

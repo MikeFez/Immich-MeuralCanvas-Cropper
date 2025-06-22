@@ -366,10 +366,8 @@ function loadImageAndInitCrop(identifier) {
     currentImageEl.onload = function() {
         console.log("Image loaded successfully:", this.naturalWidth, this.naturalHeight);
 
-        // Show editor view first
-        window.ELEMENTS.noImageViewEl.style.display = 'none';
-        window.ELEMENTS.editorViewEl.style.display = 'block';
-        document.body.classList.add('has-image');
+        // Show editor view properly through the view controller
+        showView('editor-view');
 
         // Make image visible
         currentImageEl.style.display = 'block';
@@ -429,8 +427,7 @@ function loadImageAndInitCrop(identifier) {
 
     currentImageEl.onerror = () => {
         console.error('Failed to load image:', identifier);
-        window.ELEMENTS.noImageViewEl.style.display = 'block';
-        window.ELEMENTS.editorViewEl.style.display = 'none';
+        showView('no-image-view');
         isSelectingImage = false;
     };
 

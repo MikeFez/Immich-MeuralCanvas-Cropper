@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Meural Canvas Image Cropper</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -20,6 +20,19 @@
             margin: 0 !important;
         }
     </style>
+    <script>
+        // Immediate script to ensure landing page is shown first
+        window.addEventListener('load', function() {
+            // Set a timeout to ensure this runs after other scripts
+            setTimeout(function() {
+                if (!window.APP_STATE || !window.APP_STATE.currentImage) {
+                    document.getElementById('no-image-view').style.display = 'block';
+                    document.getElementById('editor-view').style.display = 'none';
+                    console.log("Force showing landing page from header script");
+                }
+            }, 200);
+        });
+    </script>
 </head>
 <body>
     <script>
@@ -102,7 +115,7 @@
             <div class="col-lg-9 p-0">
                 <!-- Container for both views -->
                 <div class="view-container">
-                    <div id="editor-view" class="main-content">
+                    <div id="editor-view" class="main-content" style="display: none;">
                         <div class="stage-indicator">
                             <div class="stage-item">
                                 <div id="stage-1" class="stage-dot active">
@@ -181,13 +194,14 @@
                         </div>
                     </div>
 
-                    <div id="no-image-view" class="main-content" style="display: none;">
+                    <div id="no-image-view" class="main-content">
                         <div class="no-image-container">
                             <div class="no-image-icon">
-                                <i class="fas fa-images"></i>
+                                <i class="fas fa-crop-alt"></i>
                             </div>
-                            <h4>No Images Available</h4>
-                            <p class="text-muted">No images found in the Immich input album. Use the Sync button to check for new images.</p>
+                            <h3>Welcome to Meural Canvas Image Cropper</h3>
+                            <p class="text-muted">Please select an image from the sidebar to begin cropping.</p>
+                            <p class="text-muted">You'll be able to create both portrait and landscape crops optimized for your Meural Canvas display.</p>
                         </div>
                     </div>
                 </div>
@@ -221,6 +235,10 @@
     <script src="/static/js/main.js"></script>
     <script src="/static/js/meural-service.js"></script>
     <script>
+        // Immediately show the no-image-view by default
+        document.getElementById('editor-view').style.display = 'none';
+        document.getElementById('no-image-view').style.display = 'block';
+
         // Initialize config before starting the app
         initializeConfig().then(() => {
             // Update dimension labels

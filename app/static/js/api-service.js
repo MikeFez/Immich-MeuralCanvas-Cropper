@@ -217,8 +217,11 @@ function completeImage() {
                 requestAnimationFrame(() => {
                     if (!window.APP_STATE.syncing) {
                         window.APP_STATE.currentImage = null;
-                        window.ELEMENTS.currentImageEl.style.display = 'none';
+                        if (window.ELEMENTS.currentImageEl) {
+                            window.ELEMENTS.currentImageEl.style.display = 'none';
+                        }
                         showView('no-image-view');
+                        alert('All images have been processed! Well done!');
                     }
                 });
             }

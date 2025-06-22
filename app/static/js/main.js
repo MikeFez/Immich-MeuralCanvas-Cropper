@@ -49,9 +49,9 @@ async function initializeApp() {
         }
     });
 
-    // 2. Set initial view states
+    // 2. Set initial view states - show landing page by default
     window.ELEMENTS.editorViewEl.style.display = 'none';
-    window.ELEMENTS.noImageViewEl.style.display = 'none';
+    window.ELEMENTS.noImageViewEl.style.display = 'block';
 
     // 3. Setup button handlers - only once!
     const setupButtonHandler = (button, handler) => {
@@ -172,9 +172,12 @@ async function initializeApp() {
         // Render grid view
         renderImageList();
 
-        // Show initial view
-        window.ELEMENTS.noImageViewEl.style.display = 'block';
+        // Show initial view - proper landing page when no image is selected
+        window.APP_STATE.currentImage = null;
+        // Explicitly set the views
         window.ELEMENTS.editorViewEl.style.display = 'none';
+        window.ELEMENTS.noImageViewEl.style.display = 'block';
+        document.body.classList.remove('has-image');
 
         // Set initialized state
         window.APP_STATE.initialized = true;
@@ -182,6 +185,17 @@ async function initializeApp() {
 
         // Initialize filter
         initializeFilter();
+
+        // Add click event delegation for the image grid to ensure it works with the landing page
+        document.getElementById('image-grid').addEventListener('click', (e) => {
+            const gridItem = e.target.closest('.image-grid-item');
+            if (gridItem && !window.APP_STATE.syncing) {
+                const identifier = gridItem.getAttribute('data-identifier');
+                if (identifier) {
+                    selectImage(identifier);
+                }
+            }
+        });
 
     } catch (error) {
         console.error('Failed to initialize:', error);
