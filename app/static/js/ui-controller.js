@@ -122,7 +122,6 @@ function updateStage() {
         cropOverlayEl.style.display = 'none';
         previewViewEl.style.display = 'block';
         btnCropEl.style.display = 'none';
-        btnSaveEl.style.display = 'block';
         btnSkipEl.style.display = 'none';
 
         // Check crop status
@@ -153,16 +152,33 @@ function updateStage() {
             }
         }
 
-        // Return to stage 1 if no crops are set
+        // Check if both orientations are skipped (no crops)
         if (!hasPortrait && !hasLandscape) {
-            APP_STATE.currentStage = 1;
-            requestAnimationFrame(() => {
-                if (!APP_STATE.syncing) {
-                    updateStage();
-                }
-            });
-            return;
+            // Both orientations skipped - show "Skip Image" button and disable preview
+            btnSaveEl.style.display = 'block';
+            btnSaveEl.innerHTML = '<i class="fas fa-forward"></i> Skip Image';
+            btnSaveEl.className = 'btn btn-meural btn-warning';
+
+            // Disable preview button
+            if (ELEMENTS.btnMeuralPreviewEl) {
+                ELEMENTS.btnMeuralPreviewEl.disabled = true;
+                ELEMENTS.btnMeuralPreviewEl.title = 'No crops available to preview';
+            }
+        } else {
+            // At least one orientation has crops - show normal "Upload Crops" button
+            btnSaveEl.style.display = 'block';
+            btnSaveEl.innerHTML = '<i class="fas fa-save"></i> Upload Crops';
+            btnSaveEl.className = 'btn btn-meural btn-success';
+
+            // Enable preview button
+            if (ELEMENTS.btnMeuralPreviewEl) {
+                ELEMENTS.btnMeuralPreviewEl.disabled = false;
+                ELEMENTS.btnMeuralPreviewEl.title = 'Preview on Meural';
+            }
         }
+
+        // Note: No longer automatically reset to stage 1 when no crops are set
+        // This is now handled by the skip button logic to properly navigate to next image
     }
 
     // Only show/hide views during stage updates if not syncing and in edit mode

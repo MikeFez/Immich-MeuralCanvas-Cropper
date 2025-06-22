@@ -89,6 +89,9 @@
                             <button id="btn-immich-upload" class="btn btn-sm btn-success" title="Upload all processed images to Immich">
                                 <i class="fas fa-cloud-upload-alt"></i> Upload All
                             </button>
+                            <button id="btn-manage" class="btn btn-sm btn-secondary" title="Manage processed images">
+                                <i class="fas fa-cog"></i> Manage
+                            </button>
                         </div>
                     </div>
 
@@ -210,6 +213,52 @@
         </div>
     </div>
 
+    <!-- Manage Modal -->
+    <div id="manage-modal" class="manage-modal" style="display: none;">
+        <div class="manage-modal-content">
+            <div class="manage-modal-header">
+                <h2><i class="fas fa-cog"></i> Manage Images</h2>
+                <button id="manage-modal-close" class="manage-modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="manage-modal-body">
+                <div class="manage-table-container">
+                    <div class="manage-table-loading" id="manage-table-loading">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p>Loading images...</p>
+                    </div>
+
+                    <div class="manage-table-wrapper" id="manage-table-wrapper" style="display: none;">
+                        <table class="manage-table">
+                            <thead>
+                                <tr>
+                                    <th class="original-column">Original Image</th>
+                                    <th class="portrait-column">Portrait Crop</th>
+                                    <th class="landscape-column">Landscape Crop</th>
+                                </tr>
+                            </thead>
+                            <tbody id="manage-table-body">
+                                <!-- Table rows will be populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="manage-table-empty" id="manage-table-empty" style="display: none;">
+                        <div class="empty-state">
+                            <i class="fas fa-images fa-3x text-muted"></i>
+                            <h4>No processed images found</h4>
+                            <p class="text-muted">Process some images first to see them here.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // Global state & initialization tracker with init protection
@@ -235,6 +284,7 @@
     <script src="/static/js/crop-engine.js"></script>
     <script src="/static/js/main.js"></script>
     <script src="/static/js/meural-service.js"></script>
+    <script src="/static/js/manage-service.js"></script>
     <script>
         // Immediately show the no-image-view by default
         document.getElementById('editor-view').style.display = 'none';

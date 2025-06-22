@@ -601,6 +601,40 @@ class ImmichHandler:
         logging.info(f"Successfully uploaded {len(uploaded_assets)} crops from metadata")
         return uploaded_assets
 
+    def delete_asset(self, asset_id: str) -> Dict[str, Any]:
+        """Delete an asset from Immich
+
+        Args:
+            asset_id (str): Asset ID to delete
+
+        Returns:
+            Dict[str, Any]: Result with success status and message
+        """
+        try:
+            logging.info(f"Attempting to delete asset: {asset_id}")
+
+            # First check if asset exists
+            response = self._make_request(f"assets/{asset_id}")
+            if response is None:
+                return {"success": False, "error": f"Asset {asset_id} not found"}
+
+            # Delete the asset
+            delete_response = self._make_request(
+                f"assets",
+                method="DELETE",
+                data={"ids": [asset_id]}
+            )
+
+            if delete_response is not None:
+                logging.info(f"Successfully deleted asset: {asset_id}")
+                return {"success": True, "message": f"Asset {asset_id} deleted successfully"}
+            else:
+                return {"success": False, "error": f"Failed to delete asset {asset_id}"}
+
+        except Exception as e:
+            logging.error(f"Error deleting asset {asset_id}: {str(e)}")
+            return {"success": False, "error": str(e)}
+
     def _get_asset_id_from_filename(
         self, filename: str, asset_mapping: Dict[str, Dict[str, Any]]
     ) -> str:

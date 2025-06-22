@@ -345,13 +345,38 @@ body {
     width: auto;
     height: auto;
     display: block;
+    object-fit: contain;
+    margin: 0 auto;
 }
 
 /* Landscape-specific styles */
+#landscape-preview {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+#landscape-preview .photo-frame {
+    width: auto;
+    display: inline-block;
+}
+
+#landscape-preview .frame-mat {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
 #landscape-preview .frame-mat img {
     max-width: 100%;
     max-height: min(400px, calc(100vh - 300px)); /* Dynamically adjust based on viewport height */
+    width: auto;
+    height: auto;
     display: block;
+    object-fit: contain;
+    margin: 0 auto;
 }
 
 /* Preview container */
@@ -1048,5 +1073,305 @@ body.has-image #no-image-view {
     .no-image-container p {
         font-size: 0.9rem;
         max-width: 100%;
+    }
+}
+
+/* Manage Modal Styles */
+.manage-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    z-index: 2000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.manage-modal-content {
+    background: white;
+    border-radius: 12px;
+    width: 95%;
+    max-width: 1400px;
+    height: 90vh;
+    max-height: 900px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.manage-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 30px;
+    border-bottom: 1px solid #eee;
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: white;
+}
+
+.manage-modal-header h2 {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.manage-modal-header h2 i {
+    margin-right: 10px;
+}
+
+.manage-modal-close {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 1.5rem;
+    cursor: pointer;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+}
+
+.manage-modal-close:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.manage-modal-body {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.manage-table-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+.manage-table-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #6c757d;
+}
+
+.manage-table-loading p {
+    margin-top: 15px;
+    font-size: 1.1rem;
+}
+
+.manage-table-wrapper {
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: auto;
+}
+
+.manage-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+}
+
+.manage-table th {
+    background: #f8f9fa;
+    color: #495057;
+    font-weight: 600;
+    padding: 15px;
+    text-align: center;
+    border-bottom: 2px solid #dee2e6;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.manage-table td {
+    padding: 20px 15px;
+    text-align: center;
+    border-bottom: 1px solid #eee;
+    vertical-align: top;
+}
+
+.manage-table tr:hover {
+    background-color: #f8f9fa;
+}
+
+.original-column {
+    width: 33.33%;
+}
+
+.portrait-column {
+    width: 33.33%;
+}
+
+.landscape-column {
+    width: 33.33%;
+}
+
+.manage-image-preview {
+    max-width: 150px;
+    max-height: 150px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    margin-bottom: 15px;
+    object-fit: cover;
+}
+
+.manage-image-info {
+    margin-bottom: 15px;
+}
+
+.manage-image-filename {
+    font-size: 0.9rem;
+    color: #6c757d;
+    margin-bottom: 5px;
+    word-break: break-word;
+}
+
+.manage-image-dimensions {
+    font-size: 0.8rem;
+    color: #9c9c9c;
+}
+
+.manage-image-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+}
+
+.manage-action-btn {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 100px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+}
+
+.manage-action-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.manage-action-btn.delete {
+    background: #dc3545;
+    color: white;
+}
+
+.manage-action-btn.delete:hover {
+    background: #c82333;
+}
+
+.manage-action-btn.reupload {
+    background: #28a745;
+    color: white;
+}
+
+.manage-action-btn.reupload:hover {
+    background: #218838;
+}
+
+.manage-action-btn.recrop {
+    background: var(--primary-color);
+    color: white;
+}
+
+.manage-action-btn.recrop:hover {
+    background: var(--secondary-color);
+}
+
+.manage-action-btn.delete-original {
+    background: #ffc107;
+    color: #212529;
+}
+
+.manage-action-btn.delete-original:hover {
+    background: #e0a800;
+}
+
+.manage-no-image {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #6c757d;
+    font-style: italic;
+    padding: 20px;
+}
+
+.manage-no-image i {
+    font-size: 2rem;
+    margin-bottom: 10px;
+    opacity: 0.5;
+}
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #6c757d;
+    padding: 40px;
+}
+
+.empty-state h4 {
+    margin: 20px 0 10px 0;
+}
+
+.empty-state p {
+    margin: 0;
+}
+
+/* Responsive adjustments for manage modal */
+@media (max-width: 768px) {
+    .manage-modal {
+        padding: 10px;
+    }
+
+    .manage-modal-content {
+        width: 100%;
+        height: 95vh;
+    }
+
+    .manage-modal-header {
+        padding: 15px 20px;
+    }
+
+    .manage-modal-header h2 {
+        font-size: 1.3rem;
+    }
+
+    .manage-table th,
+    .manage-table td {
+        padding: 10px 8px;
+    }
+
+    .manage-image-preview {
+        max-width: 100px;
+        max-height: 100px;
+    }
+
+    .manage-action-btn {
+        min-width: 80px;
+        font-size: 0.8rem;
+        padding: 5px 8px;
     }
 }

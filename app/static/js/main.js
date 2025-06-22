@@ -102,7 +102,9 @@ async function initializeApp() {
                         console.error('Error deleting portrait metadata:', error);
                     });
 
+                // Always go to landscape stage after skipping portrait
                 window.APP_STATE.currentStage = 2;
+                updateStage();
             } else if (window.APP_STATE.currentStage === 2) {
                 // Reset local state
                 window.APP_STATE.landscapeCrop = { x: 0, y: 0, width: 0, height: 0 };
@@ -124,9 +126,10 @@ async function initializeApp() {
                         console.error('Error deleting landscape metadata:', error);
                     });
 
+                // Always go to review stage after skipping landscape
                 window.APP_STATE.currentStage = 3;
+                updateStage();
             }
-            updateStage();
         }
     });
 
@@ -154,7 +157,17 @@ async function initializeApp() {
 
     setupButtonHandler(window.ELEMENTS.btnSaveEl, () => {
         if (!window.APP_STATE.syncing) {
-            completeImage();
+            // Check if both orientations are skipped
+            const hasPortrait = window.APP_STATE.portraitCrop.width > 0;
+            const hasLandscape = window.APP_STATE.landscapeCrop.width > 0;
+
+            if (!hasPortrait && !hasLandscape) {
+                // Both orientations skipped - navigate to next image
+                navigateToNextImage();
+            } else {
+                // At least one orientation has crops - complete the image normally
+                completeImage();
+            }
         }
     });
 
@@ -287,4 +300,88 @@ function initializeFilter() {
         // If filter not found in DOM yet, retry after a short delay
         setTimeout(initializeFilter, 100);
     }
+}
+
+/**
+ * Navigate to the next image in the list
+ */
+function navigateToNextImage() {
+    const currentImage = window.APP_STATE.currentImage;
+    const imageList = window.APP_STATE.imageList;
+
+    if (!currentImage || !imageList) return;
+
+    // Find the current image index
+    const currentIndex = imageList.findIndex(img =>
+        (img.asset_id === currentImage.asset_id) || (img.filename === currentImage.filename)
+    );
+
+    if (currentIndex === -1) {
+        console.error('Current image not found in image list');
+        return;
+    }
+
+    // Check if the unprocessed filter is active
+    const filterSwitch = document.getElementById('show-unprocessed-only');
+    const showOnlyUnprocessed = filterSwitch && filterSwitch.checked;
+
+    // Helper function to check if an image is visible (not filtered)
+    function isImageVisible(image) {
+        if (!showOnlyUnprocessed) return true;
+
+        // When filter is active, only show unprocessed images
+        const identifier = image.asset_id || image.filename;
+        const gridItem = document.querySelector(`[data-identifier="${identifier}"]`);
+        return gridItem && !gridItem.classList.contains('filtered');
+    }
+
+    // Go to the next image in sequence
+    let nextIndex = currentIndex + 1;
+    let attempts = 0;
+    const maxAttempts = imageList.length;
+
+    // Keep looking for the next visible image
+    while (attempts < maxAttempts) {
+        // If we're at the end of the list, wrap around to the beginning
+        if (nextIndex >= imageList.length) {
+            nextIndex = 0;
+        }
+
+        // If we've wrapped around and are back to the same image, we've checked all
+        if (nextIndex === currentIndex) {
+            break;
+        }
+
+        const candidateImage = imageList[nextIndex];
+
+        if (candidateImage && isImageVisible(candidateImage)) {
+            // Found a visible image, select it
+            requestAnimationFrame(() => {
+                if (!window.APP_STATE.syncing) {
+                    selectImage(candidateImage.asset_id || candidateImage.filename);
+                }
+            });
+            return;
+        }
+
+        nextIndex++;
+        attempts++;
+    }
+
+    // No visible images found - either all are processed or filter shows nothing
+    requestAnimationFrame(() => {
+        if (!window.APP_STATE.syncing) {
+            window.APP_STATE.currentImage = null;
+            if (window.ELEMENTS.currentImageEl) {
+                window.ELEMENTS.currentImageEl.style.display = 'none';
+            }
+            showView('no-image-view');
+
+            if (showOnlyUnprocessed) {
+                alert('All unprocessed images have been completed! Turn off the filter to see all images.');
+            } else {
+                alert('All images have been processed! Well done!');
+            }
+        }
+    });
 }
