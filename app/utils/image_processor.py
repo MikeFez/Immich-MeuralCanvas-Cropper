@@ -72,7 +72,12 @@ def crop_image(asset_id, orientation, crop_data):
 
         # Save to output folder with EXIF data
         output_filename = f"{asset_id}_{orientation}.jpg"
-        output_path = os.path.join(OUTPUT_FOLDER, orientation, output_filename)
+        output_dir = os.path.join(OUTPUT_FOLDER, orientation)
+
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+
+        output_path = os.path.join(output_dir, output_filename)
         output_img.save(output_path, exif=exif_bytes)
 
         return True, None

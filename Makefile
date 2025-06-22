@@ -48,6 +48,8 @@ dev: clean build
 	$(DOCKER_RUN) -it -p $(HOST_PORT):$(CONTAINER_PORT) \
 		-v "$(CONFIG_DIR)":/config \
 		-v "./app":/app \
+		-e FLASK_ENV=development \
+		-e FLASK_DEBUG=1 \
 		--name $(CONTAINER_NAME) \
 		$(DOCKER_IMAGE_NAME)
 

@@ -158,6 +158,28 @@ def read_crop_data_json(asset_id, orientation):
         return None
 
 
+def read_all_crop_metadata():
+    """Read all crop metadata from metadata.json file.
+
+    Returns:
+        dict: All crop metadata organized by asset_id and orientation
+    """
+    try:
+        json_path = os.path.join("/config/crops", "metadata.json")
+
+        if not os.path.exists(json_path):
+            logging.debug("No metadata.json file found")
+            return {"crops": {}}
+
+        with open(json_path, "r") as f:
+            metadata = json.load(f)
+
+        return metadata.get("crops", {})
+    except Exception as e:
+        logging.error(f"Error reading all crop metadata from JSON: {str(e)}")
+        return {"crops": {}}
+
+
 def get_asset_id_from_filename(filename):
     """Get asset ID from filename.
 

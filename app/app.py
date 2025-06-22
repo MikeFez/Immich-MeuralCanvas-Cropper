@@ -16,6 +16,7 @@ from utils.file_handler import (
     get_image_list,
     save_crop_data_json,
     read_crop_data_json,
+    read_all_crop_metadata,
     get_asset_id_from_filename,
     get_filename_from_asset_id,
     get_asset_mapping,
@@ -516,20 +517,15 @@ def get_crop_data(identifier, orientation):
 
 @app.route("/upload-all", methods=["POST"])
 def upload_all_processed():
-    """Upload all processed images to Immich output album"""
+    """Upload all processed images to Immich output album by generating them from metadata"""
     request_id = f"upload-all-{time.time()}"
     logging.info(
         "Upload all request received [%s] from %s", request_id, request.remote_addr
     )
 
     try:
-        # Get the latest asset mapping
-        current_mapping = get_asset_mapping()
-
-        # Upload using asset_id associations
-        uploaded_assets = immich_handler.upload_processed_images(
-            config.OUTPUT_FOLDER, current_mapping["file_to_asset"]
-        )
+        # Upload using crop metadata (generates images on-demand)
+        uploaded_assets = immich_handler.upload_from_crop_metadata()
 
         logging.info(
             "Upload all completed [%s], uploaded %d files",
@@ -824,5 +820,16 @@ if __name__ == "__main__":
     logging.info("Starting Meural Canvas Image Cropper")
     logging.info(f"Attempting to connect to Immich at: {config.IMMICH_URL}")
     logging.info(f"Using temporary directory: {config.APP_TMP_DIR}")
+
+    # Respect environment variables for debug mode
+    debug_mode = os.getenv('FLASK_DEBUG', '0').lower() in ('1', 'true', 'yes', 'on')
+
+    # Configure Flask for small-scale production use
+    if not debug_mode:
+        # Suppress the development server warning for self-hosted deployments
+        import logging as flask_logging
+        werkzeug_logger = flask_logging.getLogger('werkzeug')
+        werkzeug_logger.setLevel(flask_logging.ERROR)
+
     # Handle startup errors and continue running the web app
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=debug_mode, threaded=True)

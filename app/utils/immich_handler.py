@@ -529,6 +529,78 @@ class ImmichHandler:
 
         return uploaded_assets
 
+    def upload_from_crop_metadata(self) -> List[Dict[str, Any]]:
+        """Upload all cropped images by generating them from metadata on-demand.
+
+        This method reads crop metadata and generates images dynamically instead
+        of relying on pre-generated output files in the output folder.
+
+        Returns:
+            List[Dict]: List of uploaded asset information
+        """
+        from utils.file_handler import read_all_crop_metadata
+        from utils.image_processor import crop_image
+        import config
+
+        uploaded_assets = []
+
+        # Read all crop metadata
+        all_crop_data = read_all_crop_metadata()
+
+        if not all_crop_data:
+            logging.info("No crop metadata found")
+            return uploaded_assets
+
+        # Process each asset that has crop data
+        for asset_id, crop_metadata in all_crop_data.items():
+            for orientation in ["portrait", "landscape"]:
+                if orientation not in crop_metadata:
+                    continue
+
+                crop_data = crop_metadata[orientation]
+
+                try:
+                    logging.info(f"Generating and uploading {orientation} crop for asset {asset_id}")
+
+                    # Generate the cropped image using existing crop_image function
+                    success, error = crop_image(asset_id, orientation, crop_data)
+
+                    if not success:
+                        logging.error(f"Failed to generate {orientation} crop for asset {asset_id}: {error}")
+                        continue
+
+                    # The crop_image function saves to the config.OUTPUT_FOLDER, so we can upload from there
+                    output_filename = f"{asset_id}_{orientation}.jpg"
+                    output_path = os.path.join(config.OUTPUT_FOLDER, orientation, output_filename)
+
+                    if not os.path.exists(output_path):
+                        logging.error(f"Generated crop file not found: {output_path}")
+                        continue
+
+                    # Upload the generated image
+                    response = self.upload_asset(
+                        output_path, self.output_album_id, original_asset_id=asset_id
+                    )
+
+                    if response.get("id"):
+                        uploaded_assets.append(
+                            {
+                                "original_asset_id": asset_id,
+                                "new_asset_id": response["id"],
+                                "file_path": output_path,
+                                "orientation": orientation,
+                            }
+                        )
+                        logging.info(f"Successfully uploaded {orientation} crop for asset {asset_id}")
+                    else:
+                        logging.error(f"Failed to upload {orientation} crop for asset {asset_id}")
+
+                except Exception as e:
+                    logging.error(f"Error processing {orientation} crop for asset {asset_id}: {e}")
+
+        logging.info(f"Successfully uploaded {len(uploaded_assets)} crops from metadata")
+        return uploaded_assets
+
     def _get_asset_id_from_filename(
         self, filename: str, asset_mapping: Dict[str, Dict[str, Any]]
     ) -> str:
