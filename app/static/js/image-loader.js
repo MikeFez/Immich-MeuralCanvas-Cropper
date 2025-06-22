@@ -357,6 +357,10 @@ function loadImageAndInitCrop(identifier) {
     const btnCropEl = window.ELEMENTS.btnCropEl;
     const btnSaveEl = window.ELEMENTS.btnSaveEl;
     const btnSkipEl = window.ELEMENTS.btnSkipEl;
+    
+    // Reset viewport resizing flag when loading a new image
+    // This ensures we properly use saved crop data if available
+    window._viewportResizing = false;
 
     // Set up image loading with direct sizing
     currentImageEl.onload = function() {

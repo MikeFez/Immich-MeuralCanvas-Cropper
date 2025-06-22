@@ -29,7 +29,5 @@ function getDimensions(orientation) {
 
 function getAspectRatio(orientation) {
     const dims = getDimensions(orientation);
-    return orientation === 'portrait' ?
-        dims.width / dims.height :
-        dims.width / dims.height;
+    return dims.width / dims.height;
 }
