@@ -259,7 +259,7 @@ function selectImage(identifier) {
         window.APP_STATE.currentStage = 1;
         window.APP_STATE.portraitCrop = { x: 0, y: 0, width: 0, height: 0 };
         window.APP_STATE.landscapeCrop = { x: 0, y: 0, width: 0, height: 0 };
-        
+
         // Explicitly reset the view when switching images
         if (window.ELEMENTS.previewViewEl) {
             window.ELEMENTS.previewViewEl.style.display = 'none';
@@ -402,7 +402,7 @@ function loadImageAndInitCrop(identifier) {
         btnCropEl.style.display = 'block';
         btnSaveEl.style.display = 'none';
         btnSkipEl.style.display = 'block';
-        
+
         // Reset crop elements when loading a new image
         if (window.ELEMENTS.cropOverlayEl) {
             window.ELEMENTS.cropOverlayEl.style.display = 'none'; // Will be shown after updateStage

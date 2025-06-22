@@ -144,7 +144,7 @@ function updateStage() {
             previewViewEl.style.display = 'block';
             cropOverlayEl.style.display = 'none';
             cropRectangleEl.style.display = 'none';
-            
+
             // Make sure crop button is hidden and save button is shown
             if (ELEMENTS.btnCropEl) ELEMENTS.btnCropEl.style.display = 'none';
             if (ELEMENTS.btnSaveEl) ELEMENTS.btnSaveEl.style.display = 'block';
@@ -152,7 +152,7 @@ function updateStage() {
         } else {
             // Editing stages (1 or 2) - hide preview, show crop tools
             previewViewEl.style.display = 'none';
-            
+
             // Make sure crop button is shown and save button is hidden
             if (ELEMENTS.btnCropEl) ELEMENTS.btnCropEl.style.display = 'block';
             if (ELEMENTS.btnSaveEl) ELEMENTS.btnSaveEl.style.display = 'none';
