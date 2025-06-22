@@ -193,10 +193,19 @@ function completeImage() {
             if (gridItem) {
                 gridItem.classList.add('completed');
 
-                // Update the status icon
+                // Update the status icon with split icons
                 const statusEl = gridItem.querySelector('.image-status');
                 if (statusEl) {
-                    statusEl.innerHTML = '<i class="fas fa-check-circle"></i>';
+                    statusEl.innerHTML = `
+                        <div class="split-status-icons">
+                            <div class="status-icon-circle">
+                                <i class="fas fa-mobile-alt text-success" title="Portrait"></i>
+                            </div>
+                            <div class="status-icon-circle">
+                                <i class="fas fa-desktop text-success" title="Landscape"></i>
+                            </div>
+                        </div>
+                    `;
                 }
             }
 
@@ -292,7 +301,7 @@ function resetImage() {
             if (gridItem) {
                 gridItem.classList.remove('completed');
 
-                // Update the status icon
+                // Update the status icon to show uncropped state
                 const statusEl = gridItem.querySelector('.image-status');
                 if (statusEl) {
                     statusEl.innerHTML = '<i class="fas fa-circle text-secondary"></i>';
@@ -388,15 +397,32 @@ function updateImageStatusInUI(currentImage) {
         // Update the status icon
         const statusEl = gridItem.querySelector('.image-status');
         if (statusEl) {
-            let statusIcon = '<i class="fas fa-circle text-secondary"></i>';
+            let statusIcon;
 
-            if (newStatus === 'both') {
-                statusIcon = '<i class="fas fa-check-circle text-success"></i>';
-                gridItem.classList.add('completed');
-            } else if (newStatus === 'portrait') {
-                statusIcon = '<i class="fas fa-adjust text-warning"></i>';
-            } else if (newStatus === 'landscape') {
-                statusIcon = '<i class="fas fa-adjust text-warning"></i>';
+            // Determine if image has any crops to show split view
+            const hasCrops = newStatus !== 'unprocessed';
+
+            if (hasCrops) {
+                // Show split icons for images with at least one crop
+                const hasPortrait = newStatus === 'portrait' || newStatus === 'both';
+                const hasLandscape = newStatus === 'landscape' || newStatus === 'both';
+
+                const portraitClass = hasPortrait ? 'text-success' : 'text-secondary';
+                const landscapeClass = hasLandscape ? 'text-success' : 'text-secondary';
+
+                statusIcon = `
+                    <div class="split-status-icons">
+                        <div class="status-icon-circle">
+                            <i class="fas fa-mobile-alt ${portraitClass}" title="Portrait"></i>
+                        </div>
+                        <div class="status-icon-circle">
+                            <i class="fas fa-desktop ${landscapeClass}" title="Landscape"></i>
+                        </div>
+                    </div>
+                `;
+            } else {
+                // Single icon for uncropped images
+                statusIcon = '<i class="fas fa-circle text-secondary"></i>';
             }
 
             statusEl.innerHTML = statusIcon;

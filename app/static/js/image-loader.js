@@ -97,20 +97,34 @@ function renderImageList() {
             let statusClass = '';
             let statusIcon = '<i class="fas fa-circle text-secondary"></i>';
 
-            switch (image.status) {
-                case 'completed':
+            // Determine if image has any crops to show split view
+            const hasCrops = image.status && image.status !== 'unprocessed';
+
+            if (hasCrops) {
+                // Show split icons for images with at least one crop
+                const hasPortrait = image.status === 'portrait' || image.status === 'both';
+                const hasLandscape = image.status === 'landscape' || image.status === 'both';
+
+                const portraitClass = hasPortrait ? 'text-success' : 'text-secondary';
+                const landscapeClass = hasLandscape ? 'text-success' : 'text-secondary';
+
+                statusIcon = `
+                    <div class="split-status-icons">
+                        <div class="status-icon-circle">
+                            <i class="fas fa-mobile-alt ${portraitClass}" title="Portrait"></i>
+                        </div>
+                        <div class="status-icon-circle">
+                            <i class="fas fa-desktop ${landscapeClass}" title="Landscape"></i>
+                        </div>
+                    </div>
+                `;
+
+                if (image.status === 'both') {
                     statusClass = 'completed';
-                    statusIcon = '<i class="fas fa-check-circle"></i>';
-                    break;
-                case 'portrait':
-                    statusIcon = '<i class="fas fa-portrait text-primary"></i>';
-                    break;
-                case 'landscape':
-                    statusIcon = '<i class="fas fa-image text-primary"></i>';
-                    break;
-                case 'both':
-                    statusIcon = '<i class="fas fa-images text-success"></i>';
-                    break;
+                }
+            } else {
+                // Single icon for uncropped images
+                statusIcon = '<i class="fas fa-circle text-secondary"></i>';
             }
 
             // Get the display name (original_filename if available, else filename)
