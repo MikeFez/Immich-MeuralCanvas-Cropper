@@ -314,3 +314,113 @@ function resetImage() {
         alert('Error resetting image: ' + error);
     });
 }
+
+/**
+ * Delete crop metadata for a specific orientation
+ * @param {string} identifier - Asset ID or filename
+ * @param {string} orientation - 'portrait' or 'landscape'
+ * @returns {Promise} - Promise that resolves when deletion is complete
+ */
+async function deleteCropMetadata(identifier, orientation) {
+    if (!identifier || !orientation) {
+        console.error('Missing identifier or orientation for delete operation');
+        return Promise.resolve({ success: false, message: 'Missing parameters' });
+    }
+
+    try {
+        const response = await fetch(`/crop-data/${encodeURIComponent(identifier)}/${orientation}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            console.log(`Successfully deleted ${orientation} crop metadata for ${identifier}`);
+        } else {
+            console.warn(`Failed to delete ${orientation} crop metadata:`, data.message || data.error);
+        }
+
+        return data;
+    } catch (error) {
+        console.error(`Error deleting ${orientation} crop metadata:`, error);
+        return { success: false, error: error.toString() };
+    }
+}
+
+/**
+ * Update image status in the UI after backend changes
+ * @param {Object} currentImage - The current image object
+ */
+function updateImageStatusInUI(currentImage) {
+    if (!currentImage) return;
+
+    // Determine current status based on local crop data
+    const hasPortrait = window.APP_STATE.portraitCrop.width > 0;
+    const hasLandscape = window.APP_STATE.landscapeCrop.width > 0;
+
+    let newStatus = 'unprocessed';
+    if (hasPortrait && hasLandscape) {
+        newStatus = 'both';
+    } else if (hasPortrait) {
+        newStatus = 'portrait';
+    } else if (hasLandscape) {
+        newStatus = 'landscape';
+    }
+
+    // Update the current image status
+    currentImage.status = newStatus;
+
+    // Update UI in grid view
+    const gridItemSelector = currentImage.asset_id ?
+        `.image-grid-item[data-asset-id="${currentImage.asset_id}"]` :
+        `.image-grid-item[data-filename="${currentImage.filename}"]`;
+
+    const gridItem = document.querySelector(gridItemSelector);
+    if (gridItem) {
+        // Remove completed class if no longer has both orientations
+        if (newStatus !== 'both') {
+            gridItem.classList.remove('completed');
+        }
+
+        // Update the status icon
+        const statusEl = gridItem.querySelector('.image-status');
+        if (statusEl) {
+            let statusIcon = '<i class="fas fa-circle text-secondary"></i>';
+
+            if (newStatus === 'both') {
+                statusIcon = '<i class="fas fa-check-circle text-success"></i>';
+                gridItem.classList.add('completed');
+            } else if (newStatus === 'portrait') {
+                statusIcon = '<i class="fas fa-adjust text-warning"></i>';
+            } else if (newStatus === 'landscape') {
+                statusIcon = '<i class="fas fa-adjust text-warning"></i>';
+            }
+
+            statusEl.innerHTML = statusIcon;
+        }
+    }
+}
+
+/**
+ * Clear preview image for a specific orientation
+ * @param {string} orientation - 'portrait' or 'landscape'
+ */
+function clearPreviewImage(orientation) {
+    const previewImg = orientation === 'portrait'
+        ? window.ELEMENTS.portraitPreviewImgEl
+        : window.ELEMENTS.landscapePreviewImgEl;
+
+    if (previewImg) {
+        previewImg.src = '';
+        previewImg.style.opacity = '1';
+
+        // Remove any loading indicators
+        const loadingIndicator = previewImg.parentElement.querySelector('.loading-indicator');
+        if (loadingIndicator) {
+            loadingIndicator.style.display = 'none';
+        }
+    }
+}

@@ -515,6 +515,144 @@ def get_crop_data(identifier, orientation):
         )
 
 
+@app.route("/crop-data/<path:identifier>/<orientation>", methods=["DELETE"])
+def delete_crop_data(identifier, orientation):
+    """Delete crop data for a specific orientation."""
+    request_id = f"delete-crop-{time.time()}"
+    logging.info(
+        "Delete crop data request received [%s] from %s for %s %s",
+        request_id, request.remote_addr, identifier, orientation
+    )
+
+    try:
+        # Convert filename to asset_id if needed
+        asset_id = identifier
+        if "." in identifier:  # This is a filename
+            asset_id = get_asset_id_from_filename(identifier)
+            if not asset_id:
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "message": f"Cannot find asset ID for filename: {identifier}",
+                            "request_id": request_id,
+                        }
+                    ),
+                    400,
+                )
+
+        # Delete associated output file if it exists
+        output_filename = f"{asset_id}_{orientation}.jpg"
+        output_path = os.path.join(config.OUTPUT_FOLDER, orientation, output_filename)
+
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+                logging.info("Deleted output file: %s [%s]", output_path, request_id)
+            except Exception as e:
+                logging.warning("Failed to delete output file %s: %s [%s]", output_path, str(e), request_id)
+
+        # Delete crop metadata for this specific orientation
+        metadata_path = os.path.join("/config/crops", "metadata.json")
+        if os.path.exists(metadata_path):
+            try:
+                with open(metadata_path, "r") as f:
+                    metadata = json.load(f)
+
+                # Check if asset exists and has the orientation
+                if (asset_id in metadata.get("crops", {}) and
+                    orientation in metadata["crops"][asset_id]):
+
+                    # Delete the specific orientation
+                    del metadata["crops"][asset_id][orientation]
+
+                    # If no orientations left for this asset, delete the asset entry
+                    if not metadata["crops"][asset_id]:
+                        del metadata["crops"][asset_id]
+
+                    # Save updated metadata
+                    with open(metadata_path, "w") as f:
+                        json.dump(metadata, f, indent=2)
+
+                    # Update processed_images status
+                    processed_images = load_progress()
+                    if asset_id in processed_images:
+                        current_status = processed_images[asset_id]
+
+                        if current_status == "both":
+                            # If was both, set to the remaining orientation
+                            remaining_orientation = "landscape" if orientation == "portrait" else "portrait"
+                            processed_images[asset_id] = remaining_orientation
+                        elif current_status == orientation:
+                            # If was only this orientation, mark as unprocessed
+                            del processed_images[asset_id]
+                        # If current_status is the other orientation, leave it alone
+
+                        save_progress(processed_images)
+
+                    logging.info(
+                        "Deleted %s crop data for asset %s [%s]",
+                        orientation, asset_id, request_id
+                    )
+
+                    return jsonify(
+                        {
+                            "success": True,
+                            "message": f"Deleted {orientation} crop data and output file",
+                            "request_id": request_id,
+                            "timestamp": time.time()
+                        }
+                    )
+                else:
+                    return jsonify(
+                        {
+                            "success": True,  # Not an error if data doesn't exist
+                            "message": f"No {orientation} crop data found to delete",
+                            "request_id": request_id,
+                            "timestamp": time.time(),
+                        }
+                    )
+
+            except Exception as e:
+                logging.error(
+                    "Error updating metadata.json: %s [%s]", str(e), request_id
+                )
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": f"Failed to update metadata: {str(e)}",
+                            "request_id": request_id,
+                            "timestamp": time.time(),
+                        }
+                    ),
+                    500,
+                )
+        else:
+            return jsonify(
+                {
+                    "success": True,  # Not an error if file doesn't exist
+                    "message": "No metadata file found",
+                    "request_id": request_id,
+                    "timestamp": time.time(),
+                }
+            )
+
+    except Exception as e:
+        logging.error("Error deleting crop data [%s]: %s", request_id, str(e))
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": str(e),
+                    "request_id": request_id,
+                    "timestamp": time.time(),
+                }
+            ),
+            500,
+        )
+
+
 @app.route("/upload-all", methods=["POST"])
 def upload_all_processed():
     """Upload all processed images to Immich output album by generating them from metadata"""

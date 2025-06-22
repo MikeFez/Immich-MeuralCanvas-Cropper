@@ -76,11 +76,54 @@ async function initializeApp() {
 
     setupButtonHandler(window.ELEMENTS.btnSkipEl, () => {
         if (!window.APP_STATE.syncing) {
+            const currentImage = window.APP_STATE.currentImage;
+            if (!currentImage) return;
+
+            const identifier = currentImage.asset_id || currentImage.filename;
+
             if (window.APP_STATE.currentStage === 1) {
+                // Reset local state
                 window.APP_STATE.portraitCrop = { x: 0, y: 0, width: 0, height: 0 };
+
+                // Clear portrait preview image
+                clearPreviewImage('portrait');
+
+                // Delete portrait metadata from backend
+                deleteCropMetadata(identifier, 'portrait')
+                    .then(result => {
+                        if (!result.success) {
+                            console.warn('Failed to delete portrait metadata:', result.message || result.error);
+                        } else {
+                            // Update image status in UI if needed
+                            updateImageStatusInUI(currentImage);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error deleting portrait metadata:', error);
+                    });
+
                 window.APP_STATE.currentStage = 2;
             } else if (window.APP_STATE.currentStage === 2) {
+                // Reset local state
                 window.APP_STATE.landscapeCrop = { x: 0, y: 0, width: 0, height: 0 };
+
+                // Clear landscape preview image
+                clearPreviewImage('landscape');
+
+                // Delete landscape metadata from backend
+                deleteCropMetadata(identifier, 'landscape')
+                    .then(result => {
+                        if (!result.success) {
+                            console.warn('Failed to delete landscape metadata:', result.message || result.error);
+                        } else {
+                            // Update image status in UI if needed
+                            updateImageStatusInUI(currentImage);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error deleting landscape metadata:', error);
+                    });
+
                 window.APP_STATE.currentStage = 3;
             }
             updateStage();
