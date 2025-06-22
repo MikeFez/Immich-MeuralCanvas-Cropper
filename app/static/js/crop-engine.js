@@ -63,8 +63,11 @@ function forceImageFit() {
     }
     window._forceImageFitInProgress = true;
 
-    // Set viewport resizing flag to true so we know this is triggered by a viewport change
-    window._viewportResizing = true;
+    // Only set viewport resizing flag if we're not currently loading a new image
+    // This prevents saved crop data from being ignored when loading images with existing crops
+    if (!window._loadingNewImage) {
+        window._viewportResizing = true;
+    }
 
     // Get container dimensions
     const containerWidth = window.ELEMENTS.editorContainerEl.clientWidth;
@@ -159,7 +162,10 @@ function forceImageFit() {
 
                 // Reinitialize the crop rectangle if needed, but only if we're not already inside
                 // the initCropRectangle function (to prevent recursion and shrinkage)
-                if (window.ELEMENTS.cropRectangleEl && !window._initializingCropRectangle) {
+                // Also skip if we just loaded a new image with saved crop data (to prevent double-scaling)
+                // or if we've already initialized the crop rectangle for this image
+                if (window.ELEMENTS.cropRectangleEl && !window._initializingCropRectangle && 
+                    !window._loadingNewImage && !window._cropRectangleInitialized) {
                     const { currentStage } = window.APP_STATE;
                     // Only initialize crop rectangle if we're in stage 1 or 2 (not in review stage)
                     if (currentStage === 1) {
@@ -324,6 +330,12 @@ function initCropRectangle(aspectRatio) {
 
         // Reset initialization flag
         window._initializingCropRectangle = false;
+        
+        // Reset loading new image flag after crop rectangle is properly initialized
+        window._loadingNewImage = false;
+        
+        // Mark that crop rectangle has been successfully initialized for this image
+        window._cropRectangleInitialized = true;
     }, 50);
 }
 
