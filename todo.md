@@ -8,3 +8,4 @@
     - Landscape Image
   - Under Portrait and Landscape, there should be 3 buttons - one to delete the image, one to reupload it, and another to recrop it - which closes the modal and opens the appropriate crop page.
   - Under Original, there should be a button to delete it. Not from the destination album, but from the source album
+5. Fix crop selector when doing so from the manage view
