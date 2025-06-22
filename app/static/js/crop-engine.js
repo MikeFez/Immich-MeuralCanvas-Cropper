@@ -49,6 +49,13 @@ function forceImageFit() {
 
     console.log("Forcing image fit");
 
+    // Prevent duplicate calls in quick succession
+    if (window._forceImageFitInProgress) {
+        console.log("Image fit already in progress, skipping duplicate call");
+        return;
+    }
+    window._forceImageFitInProgress = true;
+
     // Get container dimensions
     const containerWidth = window.ELEMENTS.editorContainerEl.clientWidth;
     const containerHeight = window.ELEMENTS.editorContainerEl.clientHeight;
@@ -140,8 +147,11 @@ function forceImageFit() {
                 window.ELEMENTS.editorContainerEl.dataset.imgWidth = imgRect.width;
                 window.ELEMENTS.editorContainerEl.dataset.imgHeight = imgRect.height;
 
-                // Reinitialize the crop rectangle if needed
-                if (window.ELEMENTS.cropRectangleEl && window.ELEMENTS.cropRectangleEl.style.display !== 'none') {
+                // Reinitialize the crop rectangle if needed, but only if we're not already inside
+                // the initCropRectangle function (to prevent recursion and shrinkage)
+                if (window.ELEMENTS.cropRectangleEl &&
+                    window.ELEMENTS.cropRectangleEl.style.display !== 'none' &&
+                    !window._initializingCropRectangle) {
                     const { currentStage } = window.APP_STATE;
                     if (currentStage === 1) {
                         initCropRectangle(getAspectRatio('portrait')); // Portrait ratio
@@ -150,6 +160,8 @@ function forceImageFit() {
                     }
                 }
             }
+            // Reset progress flag
+            window._forceImageFitInProgress = false;
         }, delay);
     });
 }
@@ -159,11 +171,23 @@ function forceImageFit() {
  * @param {number} aspectRatio - Desired aspect ratio for crop
  */
 function initCropRectangle(aspectRatio) {
+    // Prevent recursive calls
+    if (window._initializingCropRectangle) {
+        console.log("Already initializing crop rectangle, skipping duplicate call");
+        return;
+    }
+
+    // Set flag to prevent recursive calls
+    window._initializingCropRectangle = true;
+
     // Ensure the image is fully loaded before getting measurements
     if (!window.ELEMENTS.currentImageEl.complete ||
         !window.ELEMENTS.currentImageEl.naturalWidth) {
         console.log("Image not fully loaded, delaying initialization");
-        setTimeout(() => initCropRectangle(aspectRatio), 100);
+        setTimeout(() => {
+            window._initializingCropRectangle = false;
+            initCropRectangle(aspectRatio);
+        }, 100);
         return;
     }
 
@@ -191,14 +215,16 @@ function initCropRectangle(aspectRatio) {
     // Check if we have valid saved crop data
     if (savedCrop && savedCrop.width > 0 && savedCrop.height > 0) {
         // Get current image's natural dimensions vs display dimensions
+        // Calculate scaling once based on natural image size vs display size
+        // This ensures we're always working with the original coordinates and not re-scaling already scaled values
         const scaleX = imgWidth / window.ELEMENTS.currentImageEl.naturalWidth;
         const scaleY = imgHeight / window.ELEMENTS.currentImageEl.naturalHeight;
 
-        // Scale saved crop coordinates to match current display size
-        cropWidth = savedCrop.width * scaleX;
-        cropHeight = savedCrop.height * scaleY;
-        cropX = imgLeft + (savedCrop.x * scaleX);
-        cropY = imgTop + (savedCrop.y * scaleY);
+        // Calculate the absolute values based on the original saved crop (relative to original image)
+        cropWidth = Math.round(savedCrop.width * scaleX);
+        cropHeight = Math.round(savedCrop.height * scaleY);
+        cropX = Math.round(imgLeft + (savedCrop.x * scaleX));
+        cropY = Math.round(imgTop + (savedCrop.y * scaleY));
 
         // Ensure crop dimensions don't exceed current image bounds
         cropWidth = Math.min(cropWidth, imgWidth);
@@ -270,6 +296,9 @@ function initCropRectangle(aspectRatio) {
         updateOverlayPosition();
         // Setup crop handlers
         setupCropHandlers();
+
+        // Reset initialization flag
+        window._initializingCropRectangle = false;
     }, 50);
 }
 
@@ -583,15 +612,22 @@ function setupCropHandlers() {
  * Update crop values based on current position
  */
 function updateCropValues() {
-    // Get image position
+    // Get image position from dataset (stored by forceImageFit)
     const imgLeft = parseFloat(window.ELEMENTS.editorContainerEl.dataset.imgLeft) || 0;
     const imgTop = parseFloat(window.ELEMENTS.editorContainerEl.dataset.imgTop) || 0;
 
-    // Get crop rectangle position and size
+    // Get crop rectangle position and size directly from DOM
+    // We use parseInt to ensure we're working with whole numbers
     const cropX = parseInt(window.ELEMENTS.cropRectangleEl.style.left) || 0;
     const cropY = parseInt(window.ELEMENTS.cropRectangleEl.style.top) || 0;
     const cropWidth = parseInt(window.ELEMENTS.cropRectangleEl.style.width) || 0;
     const cropHeight = parseInt(window.ELEMENTS.cropRectangleEl.style.height) || 0;
+
+    console.log("Updating crop values:", {
+        image: { left: imgLeft, top: imgTop },
+        crop: { x: cropX, y: cropY, width: cropWidth, height: cropHeight },
+        relativeCrop: { x: cropX - imgLeft, y: cropY - imgTop }
+    });
 
     // Store values relative to the image
     const { currentStage } = window.APP_STATE;

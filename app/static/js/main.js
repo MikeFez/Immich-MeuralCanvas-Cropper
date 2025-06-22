@@ -95,6 +95,7 @@ async function initializeApp() {
                 window.APP_STATE.currentStage = 2;
                 window.ELEMENTS.btnSkipEl.style.display = 'block';
             }
+
             updateStage();
         }
     });

@@ -205,6 +205,13 @@ function showView(viewName) {
                     ELEMENTS.noImageViewEl.style.display = 'none';
                     document.body.classList.add('has-image');
 
+                    // Only call forceImageFit once to ensure proper sizing
+                    setTimeout(() => {
+                        if (!APP_STATE.syncing) {
+                            forceImageFit();
+                        }
+                    }, 50);
+
                     // Only show crop overlay in edit mode and not preview
                     if (APP_STATE.currentStage !== 3 && !APP_STATE.syncing) {
                         // Add a slight delay for DOM updates to complete
@@ -212,10 +219,10 @@ function showView(viewName) {
                             if (!APP_STATE.syncing) {
                                 ELEMENTS.cropOverlayEl.style.display = 'block';
                                 ELEMENTS.cropRectangleEl.style.display = 'block';
-                                // Force a layout recalculation to ensure crop rectangle is positioned properly
-                                forceImageFit();
+
+                                // No need to call initCropRectangle here, forceImageFit will do it
                             }
-                        }, 50);
+                        }, 70);
                     } else if (APP_STATE.currentStage === 3) {
                         // Show preview in review stage
                         ELEMENTS.previewViewEl.style.display = 'block';

@@ -1,3 +1,4 @@
 meural-cropper/config/crops/metadata.json
 config/
 run-script.sh
+*.pyc
