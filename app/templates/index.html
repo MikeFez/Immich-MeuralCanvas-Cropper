@@ -245,8 +245,8 @@
             const portraitDims = getDimensions('portrait');
             const landscapeDims = getDimensions('landscape');
             document.querySelector('#stage-name').innerHTML = `<strong>Portrait</strong> Crop (${portraitDims.width}×${portraitDims.height})`;
-            document.querySelector('#portrait-preview h5').innerText = `Portrait (${portraitDims.width}×${portraitDims.height})`;
-            document.querySelector('#landscape-preview h5').innerText = `Landscape (${landscapeDims.width}×${landscapeDims.height})`;
+            document.querySelector('#portrait-preview .frame-label').innerText = `Portrait (${portraitDims.width}×${portraitDims.height})`;
+            document.querySelector('#landscape-preview .frame-label').innerText = `Landscape (${landscapeDims.width}×${landscapeDims.height})`;
         });
     </script>
 </body>
