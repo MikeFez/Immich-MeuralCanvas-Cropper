@@ -258,7 +258,7 @@ function selectImage(identifier) {
         // Reset flags for new image selection
         window._loadingNewImage = false;
         window._cropRectangleInitialized = false;
-        
+
         // Reset state and clear UI
         window.APP_STATE.currentStage = 1;
         window.APP_STATE.portraitCrop = { x: 0, y: 0, width: 0, height: 0 };
@@ -366,7 +366,7 @@ function loadImageAndInitCrop(identifier) {
     // Reset viewport resizing flag when loading a new image
     // This ensures we properly use saved crop data if available
     window._viewportResizing = false;
-    
+
     // Set flag to indicate we're loading a new image (prevents forceImageFit from overriding)
     window._loadingNewImage = true;
 

@@ -164,7 +164,7 @@ function forceImageFit() {
                 // the initCropRectangle function (to prevent recursion and shrinkage)
                 // Also skip if we just loaded a new image with saved crop data (to prevent double-scaling)
                 // or if we've already initialized the crop rectangle for this image
-                if (window.ELEMENTS.cropRectangleEl && !window._initializingCropRectangle && 
+                if (window.ELEMENTS.cropRectangleEl && !window._initializingCropRectangle &&
                     !window._loadingNewImage && !window._cropRectangleInitialized) {
                     const { currentStage } = window.APP_STATE;
                     // Only initialize crop rectangle if we're in stage 1 or 2 (not in review stage)
@@ -330,10 +330,10 @@ function initCropRectangle(aspectRatio) {
 
         // Reset initialization flag
         window._initializingCropRectangle = false;
-        
+
         // Reset loading new image flag after crop rectangle is properly initialized
         window._loadingNewImage = false;
-        
+
         // Mark that crop rectangle has been successfully initialized for this image
         window._cropRectangleInitialized = true;
     }, 50);
