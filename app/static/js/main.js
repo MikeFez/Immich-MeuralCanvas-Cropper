@@ -92,6 +92,9 @@ async function initializeApp() {
             if (window.APP_STATE.currentStage === 2) {
                 window.APP_STATE.currentStage = 1;
             } else if (window.APP_STATE.currentStage === 3) {
+                // When going back from review stage to landscape crop stage,
+                // set viewport resizing flag to force crop rectangle to be properly sized
+                window._viewportResizing = true;
                 window.APP_STATE.currentStage = 2;
                 window.ELEMENTS.btnSkipEl.style.display = 'block';
             }

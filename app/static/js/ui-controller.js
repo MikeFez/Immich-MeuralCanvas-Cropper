@@ -57,6 +57,12 @@ function updateStage() {
 
         requestAnimationFrame(() => {
             if (!APP_STATE.syncing) {
+                // Make sure crop overlay and rectangle are visible
+                cropOverlayEl.style.display = 'block';
+                cropRectangleEl.style.display = 'block';
+                previewViewEl.style.display = 'none';
+
+                // Initialize the crop rectangle with proper size
                 initCropRectangle(getAspectRatio('portrait'));
             }
         });
@@ -72,8 +78,15 @@ function updateStage() {
         btnSkipEl.innerHTML = '<i class="fas fa-forward"></i> Skip Landscape';
         btnBackEl.disabled = false;
 
+        // When coming back from review stage, ensure crop elements are properly visible
         requestAnimationFrame(() => {
             if (!APP_STATE.syncing) {
+                // Make sure crop overlay and rectangle are visible
+                cropOverlayEl.style.display = 'block';
+                cropRectangleEl.style.display = 'block';
+                previewViewEl.style.display = 'none';
+
+                // Initialize the crop rectangle with proper size
                 initCropRectangle(getAspectRatio('landscape'));
             }
         });
