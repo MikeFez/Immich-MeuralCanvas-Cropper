@@ -1,7 +1,7 @@
 import os
 import logging
 import piexif
-from PIL import Image
+from PIL import Image, ImageOps
 from config import INPUT_FOLDER, OUTPUT_FOLDER, PORTRAIT_SIZE, LANDSCAPE_SIZE
 from utils.file_handler import get_filename_from_asset_id
 
@@ -28,7 +28,9 @@ def crop_image(asset_id, orientation, crop_data):
         if not os.path.exists(img_path):
             return False, f"Image file not found: {img_path}"
 
+        # Open the image and apply EXIF orientation
         img = Image.open(img_path)
+        img = ImageOps.exif_transpose(img)
 
         # Extract crop coordinates
         x = int(crop_data["x"])
