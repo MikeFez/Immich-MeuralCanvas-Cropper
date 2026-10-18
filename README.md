@@ -310,7 +310,7 @@ meural:
 | Permission | Used for |
 |------------|----------|
 | `album.read` | Read the input and output albums |
-| `asset.read` | Read each source image's details |
+| `asset.read` | List the albums' photos (Immich v3 search) and read each one's details |
 | `asset.download` | Download originals into the cache |
 | `asset.upload` | Upload the rendered crops |
 | `albumAsset.create` | Add crops to the output album |

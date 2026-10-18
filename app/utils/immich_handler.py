@@ -10,6 +10,9 @@ from PIL import Image
 from utils.file_handler import image_lock, remove_cached_image, write_json_atomic
 
 
+ALBUM_PAGE_SIZE = 1000  # the most Immich returns per search page
+
+
 class ImmichHandler:
     def __init__(self, settings):
         self.configure(settings)
@@ -57,23 +60,30 @@ class ImmichHandler:
             raise
 
     def get_album_assets(self, album_id: str) -> List[Dict[str, Any]]:
-        """Get all assets from a specified album"""
+        """Get all assets from a specified album.
+
+        Immich v3 removed the asset list from the album response, so page through
+        a metadata search filtered to the album (also available in Immich v2).
+        """
         if not album_id:
             raise RuntimeError("Immich is not configured; open Settings")
-        album_data = self._make_request("GET", f"/albums/{album_id}")
-
-        if (
-            album_data
-            and "assets" in album_data
-            and isinstance(album_data["assets"], list)
-        ):
-            return album_data["assets"]
-        raise ValueError("Invalid Immich album response: missing assets list")
+        assets, page = [], 1
+        while page:
+            response = self._make_request(
+                "POST", "/search/metadata", json={"albumIds": [album_id], "page": page, "size": ALBUM_PAGE_SIZE}
+            )
+            result = response.get("assets") if isinstance(response, dict) else None
+            if not isinstance(result, dict) or not isinstance(result.get("items"), list):
+                raise ValueError("Invalid Immich album search response: missing assets")
+            assets.extend(result["items"])
+            page = page + 1 if result.get("nextPage") else None
+        return assets
 
     def list_albums(self) -> List[Dict[str, Any]]:
         """Albums the key's user owns or that are shared with them, sorted by name."""
         albums = {}
-        # Without ?shared, Immich lists owned albums; ?shared=true adds ones shared with the user.
+        # Immich v3 lists owned and shared albums together (and ignores ?shared);
+        # v2 lists only owned ones unless ?shared=true.
         for params in (None, {"shared": "true"}):
             response = self._make_request("GET", "/albums", params=params)
             if not isinstance(response, list):

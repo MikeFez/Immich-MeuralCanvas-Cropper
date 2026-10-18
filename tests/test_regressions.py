@@ -406,7 +406,7 @@ class CropRegressionTests(unittest.TestCase):
     def test_failed_or_malformed_album_fetch_never_prunes_cache(self):
         handler = self.app.immich_handler
         real_fetch = type(handler).get_album_assets.__get__(handler)
-        for value in (None, {}, {'assets': 'invalid'}):
+        for value in (None, {}, {'assets': 'invalid'}, {'assets': {'items': 'invalid'}}):
             with patch.object(handler, '_make_request', return_value=value), \
                  patch.object(handler, 'get_album_assets', side_effect=real_fetch):
                 with self.assertRaises(ValueError):
@@ -416,6 +416,17 @@ class CropRegressionTests(unittest.TestCase):
             with self.assertRaises(ConnectionError):
                 handler.sync_input_images(self.app.config.INPUT_FOLDER)
         self.assertEqual(len(self.client.get('/images').json), 1)
+
+    def test_album_assets_page_through_metadata_search(self):
+        handler = self.app.immich_handler
+        real_fetch = type(handler).get_album_assets.__get__(handler)
+        pages = [{'assets': {'items': [{'id': 'a'}, {'id': 'b'}], 'nextPage': '2'}},
+                 {'assets': {'items': [{'id': 'c'}], 'nextPage': None}}]
+        with patch.object(handler, '_make_request', side_effect=pages) as request:
+            self.assertEqual([asset['id'] for asset in real_fetch('album-id')], ['a', 'b', 'c'])
+        self.assertEqual([call.args for call in request.call_args_list], [('POST', '/search/metadata')] * 2)
+        self.assertEqual([call.kwargs['json'] for call in request.call_args_list],
+                         [{'albumIds': ['album-id'], 'page': page, 'size': 1000} for page in (1, 2)])
 
     def test_failed_download_is_reported_instead_of_successful_sync(self):
         handler = self.app.immich_handler
