@@ -284,8 +284,27 @@ meural:
 ### Getting Immich API Key
 1. Log into your Immich web interface
 2. Go to Account Settings → API Keys
-3. Create a new API key
-4. Copy the key to your config file
+3. Create a new API key with only the permissions below
+4. Copy the key to your config file (never commit `config.yaml`; it's ignored by git)
+
+| Permission | Used for |
+|------------|----------|
+| `album.read` | Read the input and output albums |
+| `asset.read` | Read each source image's details |
+| `asset.download` | Download originals into the cache |
+| `asset.upload` | Upload the rendered crops |
+| `albumAsset.create` | Add crops to the output album |
+| `albumAsset.delete` | Remove an image from the input album (Manage → Remove Original) |
+| `asset.delete` | Move the previous crop to the Immich trash when re-uploading |
+
+`asset.update` isn't needed: re-uploading a crop uploads a new asset and trashes
+the old one, since Immich v3 removed in-place replacement. Nothing is ever
+permanently deleted. Without `asset.delete`, re-uploads fail after uploading the
+new crop, leaving the old one in the output album.
+
+Permissions can't be limited to specific albums, so the key can read and trash
+any asset its user owns. For tighter isolation, create a dedicated Immich user
+for the cropper and share the input and output albums with it.
 
 ### Finding Album IDs
 1. Navigate to the album in Immich web interface
