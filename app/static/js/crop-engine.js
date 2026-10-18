@@ -95,15 +95,6 @@ function updateOverlayPosition() {
     const containerRect = window.ELEMENTS.editorContainerEl.getBoundingClientRect();
     const cropRect = window.ELEMENTS.cropRectangleEl.getBoundingClientRect();
 
-    // First ensure the overlay covers the entire container
-    window.ELEMENTS.cropOverlayEl.style.position = 'absolute';
-    window.ELEMENTS.cropOverlayEl.style.left = '0';
-    window.ELEMENTS.cropOverlayEl.style.top = '0';
-    window.ELEMENTS.cropOverlayEl.style.width = '100%';
-    window.ELEMENTS.cropOverlayEl.style.height = '100%';
-    window.ELEMENTS.cropOverlayEl.style.display = 'block';
-    window.ELEMENTS.cropOverlayEl.style.backgroundColor = 'rgba(0, 0, 0, 0.6)';
-
     // Calculate crop position relative to the container instead of the overlay
     // This is more reliable as the container position is stable
     const cropLeft = cropRect.left - containerRect.left;
@@ -116,11 +107,6 @@ function updateOverlayPosition() {
     window.ELEMENTS.cropOverlayEl.style.setProperty('--crop-top', `${cropTop}px`);
     window.ELEMENTS.cropOverlayEl.style.setProperty('--crop-right', `${cropRight}px`);
     window.ELEMENTS.cropOverlayEl.style.setProperty('--crop-bottom', `${cropBottom}px`);
-
-    // Force a repaint to ensure the overlay is updated
-    window.ELEMENTS.cropOverlayEl.style.display = 'none';
-    window.ELEMENTS.cropOverlayEl.offsetHeight; // Force reflow
-    window.ELEMENTS.cropOverlayEl.style.display = 'block';
 }
 
 /**
@@ -153,8 +139,8 @@ function setupCropHandlers() {
             isDragging = true;
             startX = e.clientX;
             startY = e.clientY;
-            startLeft = parseInt(window.ELEMENTS.cropRectangleEl.style.left) || 0;
-            startTop = parseInt(window.ELEMENTS.cropRectangleEl.style.top) || 0;
+            startLeft = parseFloat(window.ELEMENTS.cropRectangleEl.style.left) || 0;
+            startTop = parseFloat(window.ELEMENTS.cropRectangleEl.style.top) || 0;
             e.preventDefault();
         }
     });
@@ -165,8 +151,8 @@ function setupCropHandlers() {
             isDragging = true;
             startX = e.touches[0].clientX;
             startY = e.touches[0].clientY;
-            startLeft = parseInt(window.ELEMENTS.cropRectangleEl.style.left) || 0;
-            startTop = parseInt(window.ELEMENTS.cropRectangleEl.style.top) || 0;
+            startLeft = parseFloat(window.ELEMENTS.cropRectangleEl.style.left) || 0;
+            startTop = parseFloat(window.ELEMENTS.cropRectangleEl.style.top) || 0;
             e.preventDefault();
         }
     }, { passive: false });
@@ -178,10 +164,10 @@ function setupCropHandlers() {
             currentHandle = this;
             startX = e.clientX;
             startY = e.clientY;
-            startLeft = parseInt(window.ELEMENTS.cropRectangleEl.style.left) || 0;
-            startTop = parseInt(window.ELEMENTS.cropRectangleEl.style.top) || 0;
-            startWidth = parseInt(window.ELEMENTS.cropRectangleEl.style.width) || 0;
-            startHeight = parseInt(window.ELEMENTS.cropRectangleEl.style.height) || 0;
+            startLeft = parseFloat(window.ELEMENTS.cropRectangleEl.style.left) || 0;
+            startTop = parseFloat(window.ELEMENTS.cropRectangleEl.style.top) || 0;
+            startWidth = parseFloat(window.ELEMENTS.cropRectangleEl.style.width) || 0;
+            startHeight = parseFloat(window.ELEMENTS.cropRectangleEl.style.height) || 0;
             e.preventDefault();
             e.stopPropagation();
         });
@@ -192,10 +178,10 @@ function setupCropHandlers() {
             currentHandle = this;
             startX = e.touches[0].clientX;
             startY = e.touches[0].clientY;
-            startLeft = parseInt(window.ELEMENTS.cropRectangleEl.style.left) || 0;
-            startTop = parseInt(window.ELEMENTS.cropRectangleEl.style.top) || 0;
-            startWidth = parseInt(window.ELEMENTS.cropRectangleEl.style.width) || 0;
-            startHeight = parseInt(window.ELEMENTS.cropRectangleEl.style.height) || 0;
+            startLeft = parseFloat(window.ELEMENTS.cropRectangleEl.style.left) || 0;
+            startTop = parseFloat(window.ELEMENTS.cropRectangleEl.style.top) || 0;
+            startWidth = parseFloat(window.ELEMENTS.cropRectangleEl.style.width) || 0;
+            startHeight = parseFloat(window.ELEMENTS.cropRectangleEl.style.height) || 0;
             e.preventDefault();
             e.stopPropagation();
         }, { passive: false });
@@ -229,8 +215,8 @@ function setupCropHandlers() {
             let newTop = startTop + dy;
 
             // Strict enforcement of image bounds
-            newLeft = Math.max(imgBounds.left, Math.min(newLeft, imgBounds.left + imgBounds.width - parseInt(window.ELEMENTS.cropRectangleEl.style.width)));
-            newTop = Math.max(imgBounds.top, Math.min(newTop, imgBounds.top + imgBounds.height - parseInt(window.ELEMENTS.cropRectangleEl.style.height)));
+            newLeft = Math.max(imgBounds.left, Math.min(newLeft, imgBounds.left + imgBounds.width - parseFloat(window.ELEMENTS.cropRectangleEl.style.width)));
+            newTop = Math.max(imgBounds.top, Math.min(newTop, imgBounds.top + imgBounds.height - parseFloat(window.ELEMENTS.cropRectangleEl.style.height)));
 
             // Apply position
             window.ELEMENTS.cropRectangleEl.style.left = newLeft + 'px';
@@ -240,83 +226,21 @@ function setupCropHandlers() {
             updateOverlayPosition();
         } else if (isResizing && currentHandle) {
             const dx = clientX - startX;
-            const dy = clientY - startY;
+            const aspectRatio = getAspectRatio(currentStage === 1 ? 'portrait' : 'landscape');
+            const isLeft = currentHandle.classList.contains('top-left') || currentHandle.classList.contains('bottom-left');
+            const isTop = currentHandle.classList.contains('top-left') || currentHandle.classList.contains('top-right');
 
-            // Calculate aspect ratio using config
-            const orientation = currentStage === 1 ? 'portrait' : 'landscape';
-            const aspectRatio = getAspectRatio(orientation);
-
-            // Get which handle is being used
-            const isTopLeft = currentHandle.classList.contains('top-left');
-            const isTopRight = currentHandle.classList.contains('top-right');
-            const isBottomLeft = currentHandle.classList.contains('bottom-left');
-            const isBottomRight = currentHandle.classList.contains('bottom-right');
-
-            let newWidth, newHeight, newLeft, newTop;
-
-            // Calculate new size and position based on handle
-            if (isBottomRight) {
-                newWidth = Math.max(50, startWidth + dx);
-                newHeight = newWidth / aspectRatio;
-                newLeft = startLeft;
-                newTop = startTop;
-            } else if (isTopRight) {
-                newWidth = Math.max(50, startWidth + dx);
-                newHeight = newWidth / aspectRatio;
-                newLeft = startLeft;
-                newTop = startTop + startHeight - newHeight;
-            } else if (isBottomLeft) {
-                newWidth = Math.max(50, startWidth - dx);
-                newHeight = newWidth / aspectRatio;
-                newLeft = startLeft + startWidth - newWidth;
-                newTop = startTop;
-            } else if (isTopLeft) {
-                newWidth = Math.max(50, startWidth - dx);
-                newHeight = newWidth / aspectRatio;
-                newLeft = startLeft + startWidth - newWidth;
-                newTop = startTop + startHeight - newHeight;
-            }
-
-            // Make sure new dimensions don't exceed image bounds
-            if (newLeft < imgBounds.left) {
-                const diff = imgBounds.left - newLeft;
-                newLeft = imgBounds.left;
-                newWidth -= diff;
-                // Always maintain the exact aspect ratio
-                newHeight = newWidth / aspectRatio;
-            }
-
-            if (newTop < imgBounds.top) {
-                const diff = imgBounds.top - newTop;
-                newTop = imgBounds.top;
-                newHeight -= diff;
-                // Always maintain the exact aspect ratio
-                newWidth = newHeight * aspectRatio;
-            }
-
-            if (newLeft + newWidth > imgBounds.left + imgBounds.width) {
-                newWidth = imgBounds.left + imgBounds.width - newLeft;
-                // Always maintain the exact aspect ratio
-                newHeight = newWidth / aspectRatio;
-            }
-
-            if (newTop + newHeight > imgBounds.top + imgBounds.height) {
-                newHeight = imgBounds.top + imgBounds.height - newTop;
-                // Always maintain the exact aspect ratio
-                newWidth = newHeight * aspectRatio;
-            }
-
-            // Additional check to ensure we never exceed image bounds on both dimensions
-            // This is needed because fixing one dimension might cause the other to exceed bounds
-            if (newWidth > imgBounds.width) {
-                newWidth = imgBounds.width;
-                newHeight = newWidth / aspectRatio;
-            }
-
-            if (newHeight > imgBounds.height) {
-                newHeight = imgBounds.height;
-                newWidth = newHeight * aspectRatio;
-            }
+            // The corner opposite the handle stays fixed while the dragged corner moves.
+            const anchorX = isLeft ? startLeft + startWidth : startLeft;
+            const anchorY = isTop ? startTop + startHeight : startTop;
+            const roomX = isLeft ? anchorX - imgBounds.left : imgBounds.left + imgBounds.width - anchorX;
+            const roomY = isTop ? anchorY - imgBounds.top : imgBounds.top + imgBounds.height - anchorY;
+            const maxWidth = Math.min(roomX, roomY * aspectRatio);
+            const desired = startWidth + (isLeft ? -dx : dx);
+            const newWidth = Math.min(maxWidth, Math.max(50, desired));
+            const newHeight = newWidth / aspectRatio;
+            const newLeft = isLeft ? anchorX - newWidth : anchorX;
+            const newTop = isTop ? anchorY - newHeight : anchorY;
 
             // Apply new size and position
             window.ELEMENTS.cropRectangleEl.style.width = newWidth + 'px';
@@ -338,10 +262,10 @@ function setupCropHandlers() {
 
             // Force a final position check to ensure crop rectangle stays on image
             const imgBounds = getImageBounds();
-            const cropLeft = parseInt(window.ELEMENTS.cropRectangleEl.style.left) || 0;
-            const cropTop = parseInt(window.ELEMENTS.cropRectangleEl.style.top) || 0;
-            const cropWidth = parseInt(window.ELEMENTS.cropRectangleEl.style.width) || 0;
-            const cropHeight = parseInt(window.ELEMENTS.cropRectangleEl.style.height) || 0;
+            const cropLeft = parseFloat(window.ELEMENTS.cropRectangleEl.style.left) || 0;
+            const cropTop = parseFloat(window.ELEMENTS.cropRectangleEl.style.top) || 0;
+            const cropWidth = parseFloat(window.ELEMENTS.cropRectangleEl.style.width) || 0;
+            const cropHeight = parseFloat(window.ELEMENTS.cropRectangleEl.style.height) || 0;
 
             // Final boundary check
             let newLeft = Math.max(imgBounds.left, Math.min(cropLeft, imgBounds.left + imgBounds.width - cropWidth));

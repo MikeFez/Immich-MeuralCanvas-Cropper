@@ -8,19 +8,6 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="/static/styles.css">
-    <style>
-        /* Inline critical fixes to guarantee they take effect */
-        html, body, .container-fluid, .row, .col-lg-3, .sidebar {
-            margin-left: 0 !important;
-            padding-left: 0 !important;
-        }
-        .container-fluid {
-            width: 100vw !important;
-            max-width: 100vw !important;
-            padding: 0 !important;
-            margin: 0 !important;
-        }
-    </style>
 </head>
 <body>
     <header class="app-header">
@@ -30,7 +17,7 @@
     <div class="container-fluid app-container">
         <div class="row g-0">
             <!-- Sidebar with zero left padding -->
-            <div class="col-lg-3 p-0">
+            <div class="col-3">
                 <div class="sidebar">
                     <div class="sidebar-header">
                         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -59,7 +46,7 @@
                       </div>
                     </div>
 
-                    <div id="image-grid" class="image-grid-container" style="display: block;">
+                    <div id="image-grid" class="image-grid-container">
                         <div class="text-center p-4">
                             <div class="spinner-border text-secondary" role="status">
                                 <span class="visually-hidden">Loading...</span>
@@ -71,7 +58,7 @@
             </div>
 
             <!-- Main content area -->
-            <div class="col-lg-9 p-0">
+            <div class="col-9">
                 <!-- Container for both views -->
                 <div class="view-container">
                     <div id="editor-view" class="main-content" style="display: none;">
@@ -237,9 +224,6 @@
     <script src="/static/js/meural-service.js"></script>
     <script src="/static/js/manage-service.js"></script>
     <script>
-        // Immediately show the no-image-view by default
-        document.getElementById('editor-view').style.display = 'none';
-        document.getElementById('no-image-view').style.display = 'block';
 
         // Initialize config before starting the app
         (window.configReady || (window.configReady = initializeConfig())).then(() => {

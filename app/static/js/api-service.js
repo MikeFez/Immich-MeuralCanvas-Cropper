@@ -159,11 +159,5 @@ function clearPreviewImage(orientation) {
     if (previewImg) {
         previewImg.src = '';
         previewImg.style.opacity = '1';
-
-        // Remove any loading indicators
-        const loadingIndicator = previewImg.parentElement.querySelector('.loading-indicator');
-        if (loadingIndicator) {
-            loadingIndicator.style.display = 'none';
-        }
     }
 }

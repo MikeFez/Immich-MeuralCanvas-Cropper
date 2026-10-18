@@ -212,11 +212,7 @@ function updateStage() {
         }
 
         requestAnimationFrame(() => {
-            if (!APP_STATE.syncing) {
-                editorViewEl.style.display = 'block';
-                noImageViewEl.style.display = 'none';
-                document.body.classList.add('has-image');
-            }
+            if (!APP_STATE.syncing) showView('editor-view');
         });
     }
 }
@@ -225,9 +221,9 @@ function updateStage() {
 function showView(viewName) {
     ensureElementsInitialized();
     const editing = viewName === 'editor-view' && !!APP_STATE.currentImage;
-    ELEMENTS.editorViewEl.style.display = editing ? 'block' : 'none';
-    ELEMENTS.noImageViewEl.style.display = editing ? 'none' : 'block';
-    document.body.classList.toggle('has-image', editing);
+    // '' falls back to the stylesheet's flex layout.
+    ELEMENTS.editorViewEl.style.display = editing ? '' : 'none';
+    ELEMENTS.noImageViewEl.style.display = editing ? 'none' : '';
     if (!editing) {
         ELEMENTS.cropOverlayEl.style.display = 'none';
         ELEMENTS.cropRectangleEl.style.display = 'none';
@@ -235,34 +231,4 @@ function showView(viewName) {
     }
 }
 
-/**
- * CSS for loading indicator
- */
-function addLoadingIndicatorStyles() {
-    const style = document.createElement('style');
-    style.textContent = `
-    .loading-indicator {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        background-color: rgba(255, 255, 255, 0.5);
-        font-size: 2rem;
-        color: var(--primary-color);
-    }
-
-    .frame-mat {
-        position: relative;
-    }
-    `;
-    document.head.appendChild(style);
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-    ensureElementsInitialized();
-    addLoadingIndicatorStyles();
-});
+document.addEventListener('DOMContentLoaded', ensureElementsInitialized);

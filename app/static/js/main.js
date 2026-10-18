@@ -50,11 +50,7 @@ async function initializeApp() {
         }
     });
 
-    // 2. Set initial view states - show landing page by default
-    window.ELEMENTS.editorViewEl.style.display = 'none';
-    window.ELEMENTS.noImageViewEl.style.display = 'block';
-
-    // 3. Setup button handlers - only once!
+    // 2. Setup button handlers - only once!
     const setupButtonHandler = (button, handler) => {
         if (!button || button._hasHandler) return; // Skip if button not found or already has handler
 
@@ -172,12 +168,9 @@ async function initializeApp() {
         // Render grid view
         renderImageList();
 
-        // Show initial view - proper landing page when no image is selected
+        // Show the landing page until an image is selected
         window.APP_STATE.currentImage = null;
-        // Explicitly set the views
-        window.ELEMENTS.editorViewEl.style.display = 'none';
-        window.ELEMENTS.noImageViewEl.style.display = 'block';
-        document.body.classList.remove('has-image');
+        showView('no-image-view');
 
         // Set initialized state
         window.APP_STATE.initialized = true;

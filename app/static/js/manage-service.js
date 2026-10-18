@@ -232,36 +232,14 @@ async function deleteOriginalImage(identifier, button) {
  * Show notification in manage modal
  */
 function showManageNotification(message, type = 'info') {
-    // Create or update notification element
     let notification = document.getElementById('manage-notification');
     if (!notification) {
         notification = document.createElement('div');
         notification.id = 'manage-notification';
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 12px 20px;
-            border-radius: 6px;
-            color: white;
-            font-weight: 500;
-            z-index: 3000;
-            max-width: 300px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-            transition: opacity 0.3s ease;
-        `;
         document.body.appendChild(notification);
     }
-
-    // Set message and style based on type
     notification.textContent = message;
-    if (type === 'success') {
-        notification.style.backgroundColor = '#28a745';
-    } else if (type === 'error') {
-        notification.style.backgroundColor = '#dc3545';
-    } else {
-        notification.style.backgroundColor = '#17a2b8';
-    }
+    notification.className = `manage-notification ${type}`;
 
     // Show notification
     notification.style.opacity = '1';

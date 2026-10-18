@@ -125,6 +125,27 @@ const second = '22222222-2222-4222-8222-222222222222';
         for (const key of ['x', 'y', 'width', 'height']) assert.ok(Math.abs(original[key] - roundtrip[key]) < 2, `${key} changed: ${original[key]} -> ${roundtrip[key]}`);
         console.log('PASS: saved crop roundtrip preserves original-image coordinates');
 
+        // Resizing into an image edge must keep the opposite corner fixed instead of sliding the box.
+        const box = () => page.locator('#crop-rectangle').boundingBox();
+        const imageBox = await page.locator('#current-image').boundingBox();
+        for (const [corner, dx, dy] of [['top-left', -400, -400], ['bottom-right', 400, 400], ['top-left', 60, 60]]) {
+            const before = await box();
+            const handle = await page.locator(`.crop-handle.${corner}`).boundingBox();
+            await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+            await page.mouse.down();
+            await page.mouse.move(handle.x + handle.width / 2 + dx, handle.y + handle.height / 2 + dy, { steps: 8 });
+            await page.mouse.up();
+            const after = await box();
+            const anchor = corner === 'top-left'
+                ? [[before.x + before.width, after.x + after.width], [before.y + before.height, after.y + after.height]]
+                : [[before.x, after.x], [before.y, after.y]];
+            for (const [was, now] of anchor) assert.ok(Math.abs(was - now) < 0.5, `${corner} drag moved its anchor ${was} -> ${now}`);
+            assert.ok(after.x >= imageBox.x - 0.5 && after.y >= imageBox.y - 0.5 &&
+                after.x + after.width <= imageBox.x + imageBox.width + 0.5 &&
+                after.y + after.height <= imageBox.y + imageBox.height + 0.5, `${corner} drag left the image`);
+        }
+        console.log('PASS: corner resizing keeps the opposite corner fixed and stays inside the image');
+
         await page.locator('#btn-manage').click();
         await page.locator(`tr[data-identifier="${asset}"] .delete`).click();
         await page.waitForFunction(() => document.querySelectorAll('#manage-table-body tr .delete').length === 0);

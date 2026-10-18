@@ -49,10 +49,10 @@ function renderImageList() {
         card.querySelector('.image-name').textContent = truncateFilename(name, 20);
         const portrait = !!image.crops?.portrait;
         const landscape = !!image.crops?.landscape;
-        const icons = portrait || landscape ? `<div class="split-status-icons">
-            <div class="status-icon-circle"><i class="fas fa-mobile-alt ${portrait ? 'text-success' : 'text-secondary'}" title="Portrait"></i></div>
-            <div class="status-icon-circle"><i class="fas fa-desktop ${landscape ? 'text-success' : 'text-secondary'}" title="Landscape"></i></div>
-            </div>` : '<i class="fas fa-circle text-secondary"></i>';
+        const icons = portrait || landscape
+            ? `<div class="status-icon-circle"><i class="fas fa-mobile-alt ${portrait ? 'text-success' : 'text-secondary'}" title="Portrait"></i></div>
+            <div class="status-icon-circle"><i class="fas fa-desktop ${landscape ? 'text-success' : 'text-secondary'}" title="Landscape"></i></div>`
+            : '<div class="status-icon-circle"><i class="fas fa-circle text-secondary"></i></div>';
         const status = card.querySelector('.image-status');
         if (status.innerHTML !== icons) status.innerHTML = icons; // Static markup; filenames never enter HTML.
         return card;
@@ -193,8 +193,6 @@ function loadImageAndInitCrop(selected) {
         isSelectingImage = false;
     };
     image.style.display = 'none';
-    image.style.maxWidth = 'none';
-    image.style.maxHeight = 'none';
     image.src = `/image/${encodeURIComponent(selected.asset_id)}?v=${encodeURIComponent(selected.source_version || '')}`;
 }
 
