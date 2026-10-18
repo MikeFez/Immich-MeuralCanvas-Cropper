@@ -212,8 +212,6 @@
             portraitCrop: { x: 0, y: 0, width: 0, height: 0 },
             landscapeCrop: { x: 0, y: 0, width: 0, height: 0 }
         };
-        window.ELEMENTS = {};
-
     </script>
     <script src="/static/js/config-service.js"></script>
     <script src="/static/js/ui-controller.js"></script>
@@ -223,17 +221,5 @@
     <script src="/static/js/main.js"></script>
     <script src="/static/js/meural-service.js"></script>
     <script src="/static/js/manage-service.js"></script>
-    <script>
-
-        // Initialize config before starting the app
-        (window.configReady || (window.configReady = initializeConfig())).then(() => {
-            // Update dimension labels
-            const portraitDims = getDimensions('portrait');
-            const landscapeDims = getDimensions('landscape');
-            document.querySelector('#stage-name').innerHTML = `<strong>Portrait</strong> Crop (${portraitDims.width}×${portraitDims.height})`;
-            document.querySelector('#portrait-preview .frame-label').innerText = `Portrait (${portraitDims.width}×${portraitDims.height})`;
-            document.querySelector('#landscape-preview .frame-label').innerText = `Landscape (${landscapeDims.width}×${landscapeDims.height})`;
-        });
-    </script>
 </body>
 </html>

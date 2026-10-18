@@ -9,7 +9,7 @@
  */
 function showManageModal() {
     if (window.APP_STATE.cropBusy || window.APP_STATE.syncing) return;
-    const modal = document.getElementById('manage-modal');
+    const modal = window.ELEMENTS.manageModalEl;
     if (!modal) return;
 
     // Show modal
@@ -26,7 +26,7 @@ function showManageModal() {
  * Hide the manage modal
  */
 function hideManageModal() {
-    const modal = document.getElementById('manage-modal');
+    const modal = window.ELEMENTS.manageModalEl;
     if (!modal) return;
 
     modal.style.display = 'none';
@@ -37,10 +37,10 @@ function hideManageModal() {
  * Load and display images in the manage table
  */
 async function loadManageData() {
-    const loadingEl = document.getElementById('manage-table-loading');
-    const wrapperEl = document.getElementById('manage-table-wrapper');
-    const emptyEl = document.getElementById('manage-table-empty');
-    const tableBodyEl = document.getElementById('manage-table-body');
+    const loadingEl = window.ELEMENTS.manageTableLoadingEl;
+    const wrapperEl = window.ELEMENTS.manageTableWrapperEl;
+    const emptyEl = window.ELEMENTS.manageTableEmptyEl;
+    const tableBodyEl = window.ELEMENTS.manageTableBodyEl;
 
     // Show loading state
     loadingEl.style.display = 'flex';
@@ -234,19 +234,19 @@ async function deleteOriginalImage(identifier, button) {
  */
 function setupManageModal() {
     // Manage button click handler
-    const manageButton = document.getElementById('btn-manage');
+    const manageButton = window.ELEMENTS.btnManageEl;
     if (manageButton) {
         manageButton.addEventListener('click', showManageModal);
     }
 
     // Close button handler
-    const closeButton = document.getElementById('manage-modal-close');
+    const closeButton = window.ELEMENTS.manageModalCloseEl;
     if (closeButton) {
         closeButton.addEventListener('click', hideManageModal);
     }
 
     // Modal backdrop click handler
-    const modal = document.getElementById('manage-modal');
+    const modal = window.ELEMENTS.manageModalEl;
     if (modal) {
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
@@ -258,7 +258,7 @@ function setupManageModal() {
     // Escape key handler
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
-            const modal = document.getElementById('manage-modal');
+            const modal = window.ELEMENTS.manageModalEl;
             if (modal && modal.style.display !== 'none') {
                 hideManageModal();
             }

@@ -12,45 +12,7 @@ async function initializeApp() {
     await (window.configReady || (window.configReady = initializeConfig()));
     console.log('Starting application initialization...');
 
-    // 1. Cache DOM elements
-    const elements = {
-        imageGrid: 'image-grid',
-        imageCount: 'image-count',
-        currentImage: 'current-image',
-        cropRectangle: 'crop-rectangle',
-        cropOverlay: 'crop-overlay',
-        editorView: 'editor-view',
-        noImageView: 'no-image-view',
-        previewView: 'preview-view',
-        portraitPreview: 'portrait-preview-img',
-        landscapePreview: 'landscape-preview-img',
-        stageName: 'stage-name',
-        editorContainer: 'editor-container',
-        stage1Label: 'stage-1-label',
-        stage2Label: 'stage-2-label',
-        stage3Label: 'stage-3-label',
-        btnBack: 'btn-back',
-        btnSkip: 'btn-skip',
-        btnReset: 'btn-reset',
-        btnCrop: 'btn-crop',
-        btnSave: 'btn-save',
-        btnImmichSync: 'btn-immich-sync',
-        btnImmichUpload: 'btn-immich-upload',
-        btnMeuralPreview: 'btn-meural-preview',
-        stage1: 'stage-1',
-        stage2: 'stage-2',
-        stage3: 'stage-3'
-    };
-
-    // Cache all elements consistently using window.ELEMENTS
-    Object.entries(elements).forEach(([key, id]) => {
-        window.ELEMENTS[key + 'El'] = document.getElementById(id);
-        if (!window.ELEMENTS[key + 'El']) {
-            console.error(`Failed to find element: ${id}`);
-        }
-    });
-
-    // 2. Setup button handlers - only once!
+    // Setup button handlers - only once!
     const setupButtonHandler = (button, handler) => {
         if (!button || button._hasHandler) return; // Skip if button not found or already has handler
 
@@ -99,10 +61,7 @@ async function initializeApp() {
             if (window.APP_STATE.currentStage === 2) {
                 window.APP_STATE.currentStage = 1;
             } else if (window.APP_STATE.currentStage === 3) {
-                // When going back from review stage to landscape crop stage,
-                // set viewport resizing flag to force crop rectangle to be properly sized
                 window.APP_STATE.currentStage = 2;
-                window.ELEMENTS.btnSkipEl.style.display = 'block';
             }
 
             updateStage();
@@ -207,7 +166,7 @@ function navigateToNextImage() {
     }
 
     // Check if the unprocessed filter is active
-    const filterSwitch = document.getElementById('show-unprocessed-only');
+    const filterSwitch = window.ELEMENTS.unprocessedFilterEl;
     const showOnlyUnprocessed = filterSwitch && filterSwitch.checked;
 
     // Helper function to check if an image is visible (not filtered)

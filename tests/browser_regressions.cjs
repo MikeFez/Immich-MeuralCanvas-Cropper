@@ -162,6 +162,45 @@ const second = '22222222-2222-4222-8222-222222222222';
         assert.equal(state.status, 'unprocessed');
         assert.equal(state.crops.portrait, null);
         console.log('PASS: Manage deletion clears saved crop and status');
+
+        // Each stage shows only its own tools; review adapts to which orientations were skipped.
+        await page.keyboard.press('Escape');
+        await page.locator(`[data-identifier="${second}"]`).click();
+        await page.waitForFunction(second => window.APP_STATE.currentImage?.asset_id === second && window._cropRectangleInitialized, second);
+        const ids = ['btn-crop', 'btn-skip', 'btn-save', 'preview-view', 'crop-overlay', 'crop-rectangle',
+            'portrait-preview', 'landscape-preview'];
+        const view = () => page.evaluate(ids => ({
+            stage: window.APP_STATE.currentStage,
+            back: window.ELEMENTS.btnBackEl.disabled,
+            save: window.ELEMENTS.btnSaveEl.innerText.trim(),
+            meural: window.ELEMENTS.btnMeuralPreviewEl.disabled,
+            dots: [1, 2, 3].map(n => document.getElementById(`stage-${n}`).className.replace('stage-dot', '').trim() || '-').join(' '),
+            visible: ids.filter(id => document.getElementById(id).checkVisibility()).join(' ')
+        }), ids);
+        const step = async button => {
+            await page.locator(button).click();
+            await page.waitForFunction(() => !window.APP_STATE.cropBusy);
+            await page.evaluate(() => new Promise(requestAnimationFrame));
+            return view();
+        };
+        const editing = 'btn-crop btn-skip crop-overlay crop-rectangle';
+        await page.evaluate(() => new Promise(requestAnimationFrame));
+        assert.deepEqual(await view(), { stage: 1, back: true, save: 'Upload Crops', meural: false, dots: 'active - -', visible: editing });
+        assert.equal((await page.locator('#btn-skip').innerText()).trim(), 'Skip Portrait');
+        assert.equal((await step('#btn-skip')).dots, 'completed active -');
+        assert.equal((await page.locator('#btn-skip').innerText()).trim(), 'Skip Landscape');
+        assert.deepEqual(await step('#btn-skip'), { stage: 3, back: false, save: 'Skip Image', meural: true,
+            dots: 'completed completed active', visible: 'btn-save preview-view' });
+        assert.deepEqual((await step('#btn-back')).visible, editing);
+        assert.deepEqual(await step('#btn-crop'), { stage: 3, back: false, save: 'Upload Crops', meural: false,
+            dots: 'completed completed active', visible: 'btn-save preview-view landscape-preview' });
+        const { width, height } = await page.evaluate(() => getDimensions('landscape'));
+        assert.equal(await page.locator('#landscape-preview .frame-label').innerText(), `Landscape (${width}×${height})`);
+        assert.equal((await step('#btn-back')).stage, 2);
+        assert.deepEqual(await step('#btn-back'), { stage: 1, back: true, save: 'Upload Crops', meural: false,
+            dots: 'active - -', visible: editing });
+        console.log('PASS: stage controls match each stage, including review with both orientations skipped');
+
         assert.deepEqual(errors, []);
         assert.deepEqual(dialogs, [], 'native alert/confirm dialogs are not used');
         console.log('PASS: no uncaught browser errors or native dialogs');

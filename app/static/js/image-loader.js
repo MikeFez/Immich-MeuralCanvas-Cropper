@@ -66,7 +66,7 @@ function renderImageList() {
  * Apply unprocessed images filter
  */
 function applyUnprocessedFilter() {
-    const filterSwitch = document.getElementById('show-unprocessed-only');
+    const filterSwitch = window.ELEMENTS.unprocessedFilterEl;
     const showOnlyUnprocessed = filterSwitch && filterSwitch.checked;
 
     // Apply filter to all image grid items
@@ -103,7 +103,7 @@ function applyUnprocessedFilter() {
  * Set up unprocessed filter handling
  */
 function setupUnprocessedFilter() {
-    const filterSwitch = document.getElementById('show-unprocessed-only');
+    const filterSwitch = window.ELEMENTS.unprocessedFilterEl;
     if (!filterSwitch) return;
 
     if (!filterSwitch._filterHandler) {
