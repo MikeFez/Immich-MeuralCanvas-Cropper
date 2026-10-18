@@ -137,9 +137,17 @@ body {
 
 /* Image list */
 .image-grid-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px;
     padding: 10px;
     overflow-y: auto;
     max-height: calc(100vh - 170px);
+}
+
+/* Loading and empty messages span the whole grid. */
+.image-grid-container > :not(.image-grid-item) {
+    grid-column: 1 / -1;
 }
 
 .image-grid-item {

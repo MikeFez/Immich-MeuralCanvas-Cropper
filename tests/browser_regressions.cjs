@@ -43,6 +43,12 @@ const second = '22222222-2222-4222-8222-222222222222';
         assert.equal(await page.locator('img[src="x"]').count(), 0);
         assert.equal(await page.evaluate(() => !!window.filenameExecuted), false);
         console.log('PASS: filenames render as text and thumbnail URLs/nodes stay stable');
+        // The library is a grid: at this width the two images sit side by side.
+        const [firstCard, secondCard] = await page.locator('.image-grid-item').evaluateAll(items =>
+            items.map(item => item.getBoundingClientRect().toJSON()));
+        assert.equal(firstCard.y, secondCard.y);
+        assert.ok(secondCard.x > firstCard.x + firstCard.width);
+        console.log('PASS: the image library is laid out as a grid');
         await page.route('**/sync', route => route.fulfill({ status: 500, contentType: 'application/json',
             body: JSON.stringify({ success: false, error: 'simulated sync failure' }) }));
         await page.locator('#btn-immich-sync').click();
