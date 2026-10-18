@@ -212,7 +212,7 @@ function updateStage() {
         }
 
         requestAnimationFrame(() => {
-            if (!APP_STATE.syncing && !isViewTransitioning) {
+            if (!APP_STATE.syncing) {
                 editorViewEl.style.display = 'block';
                 noImageViewEl.style.display = 'none';
                 document.body.classList.add('has-image');
@@ -221,112 +221,17 @@ function updateStage() {
     }
 }
 
-// Track view transitions
-let isViewTransitioning = false;
-
-/**
- * Show either editor or no-image view
- * @param {string} viewName - 'editor-view' or 'no-image-view'
- */
+/** Change view synchronously; layout is owned by the crop engine. */
 function showView(viewName) {
-    console.log('showView called with:', viewName, {
-        currentImage: APP_STATE.currentImage ? 'exists' : 'null',
-        syncing: APP_STATE.syncing,
-        transitioning: isViewTransitioning,
-        timestamp: new Date().toISOString()
-    });
-
-    // Prevent view changes during operations
-    if (APP_STATE.syncing || isViewTransitioning) {
-        console.log('View change blocked:', {
-            syncing: APP_STATE.syncing,
-            transitioning: isViewTransitioning,
-            requestedView: viewName,
-            timestamp: new Date().toISOString()
-        });
-        return;
-    }
-
-    // Ensure all required elements are initialized
     ensureElementsInitialized();
-
-    isViewTransitioning = true;
-
-    try {
-        if (viewName === 'editor-view' && APP_STATE.currentImage) {
-            requestAnimationFrame(() => {
-                if (!APP_STATE.syncing) {
-                    // First clear all display states
-                    ELEMENTS.previewViewEl.style.display = 'none';
-                    ELEMENTS.cropOverlayEl.style.display = 'none';
-                    ELEMENTS.cropRectangleEl.style.display = 'none';
-
-                    // Then show editor view
-                    ELEMENTS.editorViewEl.style.display = 'block';
-                    ELEMENTS.noImageViewEl.style.display = 'none';
-                    document.body.classList.add('has-image');
-
-                    // Only call forceImageFit once to ensure proper sizing
-                    setTimeout(() => {
-                        if (!APP_STATE.syncing) {
-                            forceImageFit();
-                        }
-                    }, 50);
-
-                    // Only show crop overlay in edit mode and not preview
-                    if (APP_STATE.currentStage !== 3 && !APP_STATE.syncing) {
-                        // Add a slight delay for DOM updates to complete
-                        setTimeout(() => {
-                            if (!APP_STATE.syncing) {
-                                ELEMENTS.cropOverlayEl.style.display = 'block';
-                                ELEMENTS.cropRectangleEl.style.display = 'block';
-
-                                // No need to call initCropRectangle here, forceImageFit will do it
-                            }
-                        }, 70);
-                    } else if (APP_STATE.currentStage === 3) {
-                        // Show preview in review stage
-                        ELEMENTS.previewViewEl.style.display = 'block';
-                    }
-                }
-                isViewTransitioning = false;
-            });
-        } else {
-            requestAnimationFrame(() => {
-                if (!APP_STATE.syncing) {
-                    // Hide all editor elements
-                    ELEMENTS.editorViewEl.style.display = 'none';
-                    ELEMENTS.cropOverlayEl.style.display = 'none';
-                    ELEMENTS.cropRectangleEl.style.display = 'none';
-                    ELEMENTS.previewViewEl.style.display = 'none';
-
-                    // Show landing page (no-image view) while keeping sidebar visible
-                    ELEMENTS.noImageViewEl.style.display = 'block';
-                    document.body.classList.remove('has-image');
-                }
-                isViewTransitioning = false;
-            });
-        }
-    } catch (error) {
-        console.error('Error during view transition:', error);
-        isViewTransitioning = false;
-
-        // Fallback to show landing page in case of errors
-        if (viewName === 'no-image-view' || !APP_STATE.currentImage) {
-            if (ELEMENTS.noImageViewEl) {
-                ELEMENTS.noImageViewEl.style.display = 'block';
-            } else {
-                document.getElementById('no-image-view').style.display = 'block';
-            }
-
-            if (ELEMENTS.editorViewEl) {
-                ELEMENTS.editorViewEl.style.display = 'none';
-            } else {
-                document.getElementById('editor-view').style.display = 'none';
-            }
-
-            document.body.classList.remove('has-image');
-        }
+    const editing = viewName === 'editor-view' && !!APP_STATE.currentImage;
+    ELEMENTS.editorViewEl.style.display = editing ? 'block' : 'none';
+    ELEMENTS.noImageViewEl.style.display = editing ? 'none' : 'block';
+    document.body.classList.toggle('has-image', editing);
+    if (!editing) {
+        ELEMENTS.cropOverlayEl.style.display = 'none';
+        ELEMENTS.cropRectangleEl.style.display = 'none';
+        ELEMENTS.previewViewEl.style.display = 'none';
     }
 }
 
@@ -357,74 +262,7 @@ function addLoadingIndicatorStyles() {
     document.head.appendChild(style);
 }
 
-// Ensure preview elements are initialized on load
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOMContentLoaded from ui-controller.js');
+document.addEventListener('DOMContentLoaded', () => {
     ensureElementsInitialized();
     addLoadingIndicatorStyles();
-
-    // Initialize grid view on load
-    const imageGridEl = document.getElementById('image-grid');
-    if (imageGridEl) {
-        imageGridEl.style.display = 'grid';
-    }
-
-    // Force the correct view without using showView to avoid any issues with initialization timing
-    if (!window.APP_STATE || !window.APP_STATE.currentImage) {
-        console.log('Forcing no-image-view to display in DOMContentLoaded');
-        const noImageViewEl = document.getElementById('no-image-view');
-        const editorViewEl = document.getElementById('editor-view');
-
-        if (noImageViewEl) {
-            noImageViewEl.style.display = 'block';
-        }
-        if (editorViewEl) {
-            editorViewEl.style.display = 'none';
-        }
-
-        // Using setTimeout to ensure this happens after other initialization
-        setTimeout(() => {
-            document.getElementById('no-image-view').style.display = 'block';
-            document.getElementById('editor-view').style.display = 'none';
-        }, 100);
-    }
-});
-
-// Enhanced resize handling
-window.addEventListener('resize', function() {
-    if (APP_STATE.currentImage && !APP_STATE.syncing) {
-        // Mark that we're doing a viewport resize
-        window._viewportResizing = true;
-
-        // Debounce resize handling
-        if (window.resizeTimer) clearTimeout(window.resizeTimer);
-        window.resizeTimer = setTimeout(function() {
-            forceImageFit();
-
-            // After forcing image fit, reinitialize crop rectangle if needed
-            if (APP_STATE.currentStage === 1 || APP_STATE.currentStage === 2) {
-                const orientation = APP_STATE.currentStage === 1 ? 'portrait' : 'landscape';
-                initCropRectangle(getAspectRatio(orientation));
-            }
-        }, 250);
-    }
-});
-
-// Also handle orientation change for mobile devices
-window.addEventListener('orientationchange', function() {
-    if (APP_STATE.currentImage && !APP_STATE.syncing) {
-        // Mark that we're doing a viewport resize
-        window._viewportResizing = true;
-
-        // Add a delay to ensure orientation change is complete
-        setTimeout(function() {
-            forceImageFit();
-
-            // After forcing image fit, reinitialize crop rectangle if needed
-            if (APP_STATE.currentStage === 1 || APP_STATE.currentStage === 2) {
-                const orientation = APP_STATE.currentStage === 1 ? 'portrait' : 'landscape';
-                initCropRectangle(getAspectRatio(orientation));
-            }
-        }, 300);
-    }
 });

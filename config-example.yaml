@@ -6,9 +6,9 @@ dimensions:
 # Immich configuration
 immich:
   url: "http://{IMMICH_URL_HERE}:2283"
-  api_key: "TKpvjF35ioeaC5eIsnFTHNkFmG7nC8fYjxxu0h1RCYE"
-  input_album_id: "789e4fbf-14ca-42bb-ad4e-0d8a27814fb9"
-  output_album_id: "66e9d580-e362-4d69-8eb3-d8fb3925de4c"
+  api_key: "YOUR_IMMICH_API_KEY"
+  input_album_id: "YOUR_INPUT_ALBUM_ID"
+  output_album_id: "YOUR_OUTPUT_ALBUM_ID"
 
 # Meural Canvas configuration
 meural:

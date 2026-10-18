@@ -1,0 +1,535 @@
+"""Run with: python -m unittest discover -s tests -v"""
+import json
+import logging
+import shutil
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from unittest.mock import Mock, MagicMock, patch
+
+from support import ASSET, PORTRAIT, LANDSCAPE, load_isolated_app, seed_image
+
+
+class CropRegressionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        logging.disable(logging.CRITICAL)
+        cls.temporary, cls.application = load_isolated_app()
+        from utils import file_handler
+        cls.files = file_handler
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.temporary.cleanup()
+        logging.disable(logging.NOTSET)
+
+    def setUp(self):
+        self.app = self.application
+        shutil.rmtree(self.app.config.INPUT_FOLDER, ignore_errors=True)
+        for path in (self.app.config.LEGACY_PROGRESS_FILE, self.app.config.CROP_METADATA_FILE):
+            Path(path).unlink(missing_ok=True)
+        self.app.config.init_directories()
+        seed_image(self.app)
+        self.client = self.app.app.test_client()
+        self.outbound = patch('requests.request', side_effect=AssertionError('Live HTTP is forbidden in tests'))
+        self.outbound.start()
+        self.addCleanup(self.outbound.stop)
+        # Uploads prefetch the output album; default to an empty one.
+        album = patch.object(self.app.immich_handler, 'get_album_assets', return_value=[])
+        album.start()
+        self.addCleanup(album.stop)
+
+    def save(self, both=True):
+        self.assertTrue(self.files.save_crop(ASSET, 'portrait', PORTRAIT))
+        if both:
+            self.assertTrue(self.files.save_crop(ASSET, 'landscape', LANDSCAPE))
+
+    def image(self):
+        return self.client.get('/images').json[0]
+
+    def saved(self, orientation, asset=ASSET):
+        return self.files.saved_crop(self.files.read_all_crop_metadata().get(asset, {}), orientation)
+
+    def crop(self, orientation='portrait', crop=None):
+        return self.client.post('/crop', json={'identifier': ASSET, 'orientation': orientation,
+                                              'crop': PORTRAIT if crop is None else crop})
+
+    def test_offline_app_and_health_are_available(self):
+        with patch.object(self.app.immich_handler, 'sync_input_images', side_effect=ConnectionError('offline')):
+            self.app.initial_sync()
+        self.assertFalse(self.app.sync_lock.locked())
+        self.assertEqual(self.client.get('/health').status_code, 200)
+        self.assertEqual(self.client.get('/').status_code, 200)
+
+    def complete(self):
+        return self.client.post('/complete', json={'identifier': ASSET})
+
+    def test_empty_complete_is_rejected(self):
+        with patch.object(self.app.immich_handler, 'upload_asset') as upload:
+            response = self.complete()
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json['success'])
+        upload.assert_not_called()
+        self.assertEqual(self.image()['status'], 'unprocessed')
+
+    def test_complete_renders_and_uploads_all_saved_crops_from_memory(self):
+        import io
+        from PIL import Image
+        self.save()
+        with patch.object(self.app.immich_handler, 'upload_asset', return_value='uploaded') as upload:
+            response = self.complete()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json['uploaded_files']), 2)
+        self.assertEqual(response.json['image']['status'], 'completed')
+        self.assertEqual(self.image()['status'], 'completed')
+        for call, (orientation, size) in zip(upload.call_args_list, [('portrait', (90, 160)), ('landscape', (160, 90))]):
+            content, filename = call.args[:2]
+            self.assertEqual(filename, f'{ASSET}_{orientation}.jpg')
+            with Image.open(io.BytesIO(content)) as image:
+                self.assertEqual(image.size, size)
+
+    def test_complete_replaces_the_previous_album_copy(self):
+        self.save(False)
+        self.app.immich_handler.get_album_assets.return_value = [
+            {'id': 'old-upload', 'originalFileName': f'{ASSET}_portrait.jpg'}]
+        with patch.object(self.app.immich_handler, 'upload_asset', return_value='new-upload') as upload:
+            self.assertEqual(self.complete().status_code, 200)
+        self.assertEqual(upload.call_args.kwargs['replaces'], 'old-upload')
+        uploaded = self.files.read_all_crop_metadata()[ASSET]['portrait']['uploaded']
+        self.assertEqual((uploaded['asset_id'], uploaded['crop']), ('new-upload', PORTRAIT))
+
+    def test_single_orientation_reupload(self):
+        self.save()
+        with patch.object(self.app.immich_handler, 'upload_asset', return_value='landscape-upload') as upload:
+            response = self.client.post('/upload-single', json={'identifier': ASSET, 'orientation': 'landscape'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['uploaded_asset_id'], 'landscape-upload')
+        self.assertEqual(upload.call_args.args[1], f'{ASSET}_landscape.jpg')
+        self.assertEqual(response.json['image']['status'], 'both')  # portrait not uploaded yet
+        self.assertEqual(self.client.post('/upload-single', json={'identifier': ASSET, 'orientation': 'other'}).status_code, 400)
+
+    def test_partial_upload_is_failure_and_records_only_the_success(self):
+        self.save()
+        with patch.object(self.app.immich_handler, 'upload_asset', side_effect=['portrait-upload', RuntimeError('offline')]):
+            response = self.complete()
+        self.assertEqual(response.status_code, 500)
+        self.assertFalse(response.json['success'])
+        self.assertEqual(len(response.json['uploaded_files']), 1)
+        self.assertEqual(response.json['image']['status'], 'both')
+        entry = self.files.read_all_crop_metadata()[ASSET]
+        self.assertIn('uploaded', entry['portrait'])
+        self.assertNotIn('uploaded', entry['landscape'])
+
+    def test_recrop_after_upload_makes_image_pending_again(self):
+        self.save()
+        self.files.mark_uploaded(ASSET, 'portrait', 'p', PORTRAIT)
+        self.files.mark_uploaded(ASSET, 'landscape', 'l', LANDSCAPE)
+        self.assertEqual(self.image()['status'], 'completed')
+        response = self.crop(crop={**PORTRAIT, 'x': 60})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['image']['status'], 'both')
+        self.assertEqual(self.saved('landscape'), LANDSCAPE)
+
+    def test_crop_reports_metadata_write_failure_and_preserves_saved_crop(self):
+        self.save()
+        with patch.object(self.files, 'write_json_atomic', side_effect=OSError('disk full')):
+            response = self.crop(crop={**PORTRAIT, 'x': 60})
+        self.assertEqual(response.status_code, 500)
+        self.assertFalse(response.json['success'])
+        self.assertEqual(self.saved('portrait'), PORTRAIT)
+
+    def test_invalid_crop_and_orientation_are_rejected(self):
+        # The fixture image is 160x90, so x=160 starts outside it.
+        for crop in ({**PORTRAIT, 'width': 0}, {**PORTRAIT, 'x': -1}, {**PORTRAIT, 'width': '45'}, {},
+                     {**PORTRAIT, 'x': 160}):
+            self.assertEqual(self.crop(crop=crop).status_code, 400)
+        self.assertEqual(self.crop(orientation='other').status_code, 400)
+        self.assertEqual(self.client.delete(f'/crop-data/{ASSET}/other').status_code, 400)
+        self.assertEqual(self.files.read_all_crop_metadata(), {})
+
+    def test_only_uuid_asset_ids_are_accepted(self):
+        for identifier in (f'{ASSET}.jpg', 'synthetic.jpg', '../config'):
+            self.assertEqual(self.client.post('/reset', json={'identifier': identifier}).status_code, 400)
+        self.assertEqual(self.client.get(f'/image/{ASSET}.jpg').status_code, 400)
+        missing = '33333333-3333-4333-8333-333333333333'
+        self.assertEqual(self.client.get(f'/image/{missing}').status_code, 404)
+        self.assertEqual(self.client.post('/crop', json={'identifier': missing, 'orientation': 'portrait',
+                                                         'crop': PORTRAIT}).status_code, 404)
+
+    def test_delete_updates_status_and_keeps_upload_record(self):
+        self.save()
+        self.files.mark_uploaded(ASSET, 'portrait', 'p', PORTRAIT)
+        response = self.client.delete(f'/crop-data/{ASSET}/portrait')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['image']['crops'], {'portrait': None, 'landscape': LANDSCAPE})
+        self.assertEqual(response.json['image']['status'], 'landscape')
+        self.assertEqual(self.files.read_all_crop_metadata()[ASSET]['portrait']['uploaded']['asset_id'], 'p')
+        self.client.delete(f'/crop-data/{ASSET}/landscape')
+        self.assertEqual(self.image()['status'], 'unprocessed')
+
+    def test_reset_clears_saved_crops(self):
+        self.save()
+        response = self.client.post('/reset', json={'identifier': ASSET})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.files.read_all_crop_metadata(), {})
+        self.assertEqual(self.image()['status'], 'unprocessed')
+
+    def test_legacy_crops_and_progress_are_migrated_once(self):
+        path = Path(self.app.config.CROP_METADATA_FILE)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        second = '22222222-2222-4222-8222-222222222222'
+        path.write_text(json.dumps({'crops': {ASSET: {'portrait': PORTRAIT, 'landscape': LANDSCAPE},
+                                              second: {'portrait': PORTRAIT}}}))
+        progress = Path(self.app.config.LEGACY_PROGRESS_FILE)
+        progress.write_text(json.dumps({ASSET: 'completed', second: 'portrait'}))
+        self.files.migrate_legacy_state()
+        crops = self.files.read_all_crop_metadata()
+        self.assertEqual(crops[ASSET]['landscape']['crop'], LANDSCAPE)
+        self.assertEqual(self.files.image_status(crops[ASSET]), 'completed')
+        self.assertEqual(self.files.image_status(crops[second]), 'portrait')
+        self.assertFalse(progress.exists())
+        self.assertTrue(Path(f'{progress}.migrated').exists())
+        self.files.migrate_legacy_state()
+        self.assertEqual(self.files.read_all_crop_metadata(), crops)
+
+    def test_missing_preview_is_regenerated_from_saved_coordinates(self):
+        self.save(False)
+        response = self.client.get(f'/output/portrait/{ASSET}')
+        self.assertEqual(response.status_code, 200)
+        response.close()
+
+    def test_source_removal_does_not_delete_library_asset(self):
+        with patch.object(self.app.immich_handler, '_make_request', return_value=[{'id': ASSET, 'success': True}]) as request:
+            response = self.client.delete('/delete-original', json={'identifier': ASSET})
+        self.assertEqual(response.status_code, 200)
+        request.assert_called_once_with('DELETE', '/albums/source-album/assets', json={'ids': [ASSET]})
+        self.assertEqual(self.client.get('/images').json, [])
+
+    def test_source_removal_failure_keeps_local_cache(self):
+        with patch.object(self.app.immich_handler, '_make_request', return_value=[{'id': ASSET, 'success': False}]):
+            response = self.client.delete('/delete-original', json={'identifier': ASSET})
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(len(self.client.get('/images').json), 1)
+
+    def test_trash_helper_passes_correct_method_endpoint_and_json(self):
+        with patch.object(self.app.immich_handler, '_make_request', return_value={}) as request:
+            self.app.immich_handler.trash_asset(ASSET)
+        request.assert_called_once_with('DELETE', '/assets', json={'ids': [ASSET]})
+
+    def test_batch_partial_failure_never_marks_asset_completed(self):
+        self.save()
+        with patch.object(self.app.immich_handler, 'upload_asset', side_effect=['uploaded', RuntimeError('offline')]):
+            response = self.client.post('/upload-all')
+        self.assertEqual(response.status_code, 502)
+        self.assertFalse(response.json['success'])
+        self.assertEqual(response.json['failed_assets'], [ASSET])
+        self.assertEqual(len(response.json['uploaded_assets']), 1)
+        self.assertEqual(self.image()['status'], 'both')
+
+    def test_corrupt_metadata_is_not_overwritten(self):
+        path = Path(self.app.config.CROP_METADATA_FILE)
+        path.parent.mkdir(exist_ok=True, parents=True)
+        path.write_text('{broken')
+        self.assertFalse(self.files.save_crop(ASSET, 'portrait', PORTRAIT))
+        self.assertEqual(path.read_text(), '{broken')
+
+    def test_atomic_write_failure_preserves_old_document(self):
+        self.save()
+        with patch.object(self.files.os, 'replace', side_effect=OSError('interrupted')):
+            self.assertFalse(self.files.save_crop(ASSET, 'portrait', {**PORTRAIT, 'x': 60}))
+        self.assertEqual(self.saved('portrait'), PORTRAIT)
+
+    def test_concurrent_metadata_updates_do_not_lose_other_assets(self):
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(lambda n: self.files.save_crop(f'asset-{n}', 'portrait', PORTRAIT), range(12)))
+        self.assertTrue(all(results))
+        self.assertEqual(len(self.files.read_all_crop_metadata()), 12)
+
+    def test_uploaded_single_orientation_is_completed_with_one_crop(self):
+        self.save(False)
+        self.files.mark_uploaded(ASSET, 'portrait', 'p', PORTRAIT)
+        image = self.image()
+        self.assertEqual(image['status'], 'completed')
+        self.assertEqual(image['crops'], {'portrait': PORTRAIT, 'landscape': None})
+
+    def test_http_calls_always_have_timeout(self):
+        response = Mock(ok=True, content=b'{}')
+        response.json.return_value = {}
+        with patch('requests.request', return_value=response) as request:
+            self.app.immich_handler._make_request('GET', '/server/ping')
+        self.assertEqual(request.call_args.kwargs['timeout'], (5, 60))
+
+    def test_upload_rejects_failed_album_membership(self):
+        handler = self.app.immich_handler
+        with patch.object(handler, '_make_request', return_value={'id': 'uploaded'}), \
+             patch.object(handler, 'add_assets_to_album', return_value=False):
+            with self.assertRaisesRegex(RuntimeError, 'destination album failed'):
+                handler.upload_asset(b'jpeg', f'{ASSET}_portrait.jpg', handler.output_album_id)
+
+    def reupload(self, upload_response):
+        """Upload over an existing processed version; return the new ID and request calls."""
+        handler = self.app.immich_handler
+        with patch.object(handler, '_make_request', side_effect=[upload_response, {}]) as request, \
+             patch.object(handler, 'add_assets_to_album', return_value=True):
+            asset_id = handler.upload_asset(b'jpeg', f'{ASSET}_portrait.jpg', handler.output_album_id,
+                                            replaces='old-upload')
+        return asset_id, [call.args for call in request.call_args_list]
+
+    def test_reupload_supersedes_and_trashes_previous_version(self):
+        asset_id, calls = self.reupload({'id': 'new-upload'})
+        self.assertEqual(asset_id, 'new-upload')
+        self.assertEqual(calls, [('POST', '/assets'), ('DELETE', '/assets')])
+
+    def test_identical_reupload_deduplicated_by_immich_keeps_existing_asset(self):
+        asset_id, calls = self.reupload({'id': 'old-upload', 'status': 'duplicate'})
+        self.assertEqual(asset_id, 'old-upload')
+        self.assertEqual(calls, [('POST', '/assets')])
+
+    def test_previous_copy_is_matched_by_upload_filename(self):
+        from utils.immich_handler import find_processed_asset
+        album = [{'id': 'other', 'originalFileName': 'holiday.jpg'},
+                 {'id': 'old', 'originalFileName': f'{ASSET}_portrait.jpg'}]
+        self.assertEqual(find_processed_asset(album, f'{ASSET}_portrait.jpg'), 'old')
+        self.assertIsNone(find_processed_asset(album, f'{ASSET}_landscape.jpg'))
+
+    def test_album_lookup_failure_aborts_upload_instead_of_duplicating(self):
+        self.save(False)
+        self.app.immich_handler.get_album_assets.side_effect = ConnectionError('offline')
+        with patch.object(self.app.immich_handler, '_make_request') as request:
+            response = self.complete()
+        self.assertEqual(response.status_code, 500)
+        request.assert_not_called()
+
+    def test_each_orientation_uses_a_distinct_device_asset_id(self):
+        handler = self.app.immich_handler
+        device_ids = []
+        with patch.object(handler, '_make_request', return_value={'id': 'uploaded'}) as request, \
+             patch.object(handler, 'add_assets_to_album', return_value=True):
+            for orientation in ('portrait', 'landscape'):
+                handler.upload_asset(b'jpeg', f'{ASSET}_{orientation}.jpg', handler.output_album_id)
+                device_ids.append(request.call_args.kwargs['data']['deviceAssetId'])
+        self.assertEqual(device_ids, [f'{ASSET}_portrait', f'{ASSET}_landscape'])
+
+    def test_sync_redownloads_missing_image(self):
+        source = Path(self.app.config.INPUT_FOLDER) / f'{ASSET}.jpg'
+        source.unlink()
+        handler = self.app.immich_handler
+        def download(asset_id, folder):
+            seed_image(self.app, asset_id)
+            return True, str(Path(folder) / f'{asset_id}.jpg')
+        with patch.object(handler, 'get_album_assets', return_value=[{'id': ASSET}]), \
+             patch.object(handler, 'download_asset', side_effect=download) as fetch:
+            result = handler.sync_input_images(self.app.config.INPUT_FOLDER)
+        fetch.assert_called_once()
+        self.assertTrue(source.exists())
+        self.assertEqual(result[0]['asset_id'], ASSET)
+
+    def test_sync_repairs_corrupt_source_and_metadata(self):
+        handler = self.app.immich_handler
+        source = Path(self.app.config.INPUT_FOLDER) / f'{ASSET}.jpg'
+        metadata = Path(self.app.config.INPUT_FOLDER) / '.metadata' / f'{ASSET}.json'
+        for corrupt_path in (source, metadata):
+            corrupt_path.write_bytes(b'broken')
+            def download(asset_id, folder):
+                seed_image(self.app, asset_id)
+                return True, str(source)
+            with patch.object(handler, 'get_album_assets', return_value=[{'id': ASSET}]), \
+                 patch.object(handler, 'download_asset', side_effect=download) as fetch:
+                handler.sync_input_images(self.app.config.INPUT_FOLDER)
+            fetch.assert_called_once()
+
+    def test_sync_removes_departed_assets_but_keeps_saved_crops(self):
+        self.save()
+        with patch.object(self.app.immich_handler, 'get_album_assets', return_value=[]):
+            self.app.immich_handler.sync_input_images(self.app.config.INPUT_FOLDER)
+        self.assertEqual(self.client.get('/images').json, [])
+        self.assertEqual(self.saved('portrait'), PORTRAIT)
+
+    def test_failed_or_malformed_album_fetch_never_prunes_cache(self):
+        handler = self.app.immich_handler
+        real_fetch = type(handler).get_album_assets.__get__(handler)
+        for value in (None, {}, {'assets': 'invalid'}):
+            with patch.object(handler, '_make_request', return_value=value), \
+                 patch.object(handler, 'get_album_assets', side_effect=real_fetch):
+                with self.assertRaises(ValueError):
+                    handler.sync_input_images(self.app.config.INPUT_FOLDER)
+            self.assertEqual(len(self.client.get('/images').json), 1)
+        with patch.object(handler, 'get_album_assets', side_effect=ConnectionError('offline')):
+            with self.assertRaises(ConnectionError):
+                handler.sync_input_images(self.app.config.INPUT_FOLDER)
+        self.assertEqual(len(self.client.get('/images').json), 1)
+
+    def test_failed_download_is_reported_instead_of_successful_sync(self):
+        handler = self.app.immich_handler
+        with patch.object(handler, 'get_album_assets', return_value=[{'id': 'new-asset'}]), \
+             patch.object(handler, 'download_asset', return_value=(False, '')):
+            with self.assertRaisesRegex(RuntimeError, 'retry Sync'):
+                handler.sync_input_images(self.app.config.INPUT_FOLDER)
+
+    def test_thumbnail_is_small_and_conditionally_cached(self):
+        import io
+        from PIL import Image
+        path = Path(self.app.config.INPUT_FOLDER) / f'{ASSET}.jpg'
+        Image.new('RGB', (1200, 800), 'orange').save(path)
+        response = self.client.get(f'/thumbnail/{ASSET}')
+        self.assertEqual(response.status_code, 200)
+        with Image.open(io.BytesIO(response.data)) as image:
+            self.assertLessEqual(max(image.size), 320)
+        etag = response.headers['ETag']
+        cached = self.client.get(f'/thumbnail/{ASSET}', headers={'If-None-Match': etag})
+        self.assertEqual(cached.status_code, 304)
+        cached.close()
+        Image.new('RGB', (1200, 800), 'navy').save(path)
+        changed = self.client.get(f'/thumbnail/{ASSET}', headers={'If-None-Match': etag})
+        self.assertEqual(changed.status_code, 200)
+        self.assertNotEqual(changed.headers['ETag'], etag)
+        response.close()
+        changed.close()
+
+    def test_renderer_preserves_exif_and_color_profile_with_correct_dimensions(self):
+        import io
+        import piexif
+        from PIL import Image, ImageCms
+        from utils.image_processor import render_image
+        path = Path(self.app.config.INPUT_FOLDER) / f'{ASSET}.jpg'
+        profile = ImageCms.ImageCmsProfile(ImageCms.createProfile('sRGB')).tobytes()
+        exif = {'0th': {piexif.ImageIFD.Orientation: 6, piexif.ImageIFD.Make: b'Test Camera'},
+                'Exif': {piexif.ExifIFD.DateTimeOriginal: b'2020:01:02 03:04:05'},
+                'GPS': {piexif.GPSIFD.GPSLatitudeRef: b'N',
+                        piexif.GPSIFD.GPSLatitude: ((40, 1), (30, 1), (0, 1))}, '1st': {}, 'thumbnail': None}
+        Image.new('RGB', (160, 90), 'orange').save(path, exif=piexif.dump(exif), icc_profile=profile)
+        content = render_image(path, {'x': 0, 'y': 100, 'width': 90, 'height': 60}, (90, 60))
+        with Image.open(io.BytesIO(content)) as image:
+            saved = piexif.load(image.info['exif'])
+            self.assertEqual(image.size, (90, 60))
+            self.assertEqual(image.info['icc_profile'], profile)
+            self.assertEqual(saved['0th'][piexif.ImageIFD.Orientation], 1)
+            self.assertEqual(saved['0th'][piexif.ImageIFD.Make], b'Test Camera')
+            self.assertEqual(saved['Exif'][piexif.ExifIFD.DateTimeOriginal], b'2020:01:02 03:04:05')
+            self.assertEqual(saved['GPS'][piexif.GPSIFD.GPSLatitudeRef], b'N')
+            self.assertEqual(saved['Exif'][piexif.ExifIFD.PixelXDimension], 90)
+            self.assertEqual(saved['Exif'][piexif.ExifIFD.PixelYDimension], 60)
+            # Quality 95 has much smaller quantization values than low-quality output.
+            self.assertLess(max(image.quantization[0]), 30)
+
+    def test_meural_preview_upload_and_saved_preview_have_identical_pixels(self):
+        from PIL import Image
+        path = Path(self.app.config.INPUT_FOLDER) / f'{ASSET}.jpg'
+        exif = Image.Exif()
+        exif[274] = 6
+        Image.new('RGB', (160, 90), 'orange').save(path, exif=exif)
+        crop = {'x': 0, 'y': 100, 'width': 90, 'height': 60}
+        self.assertEqual(self.crop('landscape', crop).status_code, 200)
+        with patch.object(self.app.meural_handler, 'preview_image', return_value={'success': True}) as preview, \
+             patch.object(self.app.immich_handler, 'upload_asset', return_value='uploaded') as upload:
+            response = self.client.post('/meural/preview', json={'identifier': ASSET, 'orientation': 'landscape',
+                                                                 'device_ip': '127.0.0.1'})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(self.complete().status_code, 200)
+        saved = self.client.get(f'/output/landscape/{ASSET}').data
+        self.assertEqual(preview.call_args.args[1], saved)
+        self.assertEqual(upload.call_args.args[0], saved)
+
+    def test_meural_requires_an_explicit_pass(self):
+        from utils.meural_handler import MeuralHandler
+        handler = MeuralHandler([{'name': 'test', 'ip': '127.0.0.1'}])
+        passed = Mock(status_code=200, text='ok')
+        passed.json.return_value = {'status': 'pass'}
+        unparsable = Mock(status_code=200, text='<html>')
+        unparsable.json.side_effect = ValueError('not json')
+        with patch.object(handler, '_set_preview_duration'), \
+             patch('requests.post', side_effect=[passed, unparsable]) as post:
+            self.assertTrue(handler.preview_image('127.0.0.1', b'jpeg')['success'])
+            self.assertFalse(handler.preview_image('127.0.0.1', b'jpeg')['success'])
+        self.assertEqual(post.call_args.kwargs['files']['photo'][2], 'image/jpeg')
+        self.assertFalse(handler.preview_image('10.0.0.1', b'jpeg')['success'])
+
+    def test_slow_upload_does_not_block_listing_previews_or_other_images(self):
+        import threading
+        second = '22222222-2222-4222-8222-222222222222'
+        seed_image(self.app, second)
+        self.save(False)
+        started, release = threading.Event(), threading.Event()
+        def upload(*args, **kwargs):
+            started.set()
+            if not release.wait(5):
+                raise TimeoutError('Test upload was not released')
+            return 'uploaded'
+        def complete():
+            return self.app.app.test_client().post('/complete', json={'identifier': ASSET})
+        with patch.object(self.app.immich_handler, 'upload_asset', side_effect=upload), \
+             ThreadPoolExecutor(max_workers=3) as executor:
+            future = executor.submit(complete)
+            self.assertTrue(started.wait(2))
+            try:
+                listing = executor.submit(lambda: self.app.app.test_client().get('/images')).result(timeout=1)
+                preview = executor.submit(lambda: self.app.app.test_client().get(f'/output/portrait/{ASSET}')).result(timeout=1)
+                other = executor.submit(lambda: self.app.app.test_client().post('/crop', json={
+                    'identifier': second, 'orientation': 'portrait', 'crop': PORTRAIT
+                })).result(timeout=1)
+                self.assertEqual(listing.status_code, 200)
+                self.assertEqual(preview.status_code, 200)
+                self.assertEqual(other.status_code, 200)
+            finally:
+                release.set()
+            self.assertEqual(future.result(timeout=2).status_code, 200)
+
+    def test_download_publishes_complete_native_image_and_metadata(self):
+        import io
+        from PIL import Image
+        buffer = io.BytesIO()
+        Image.new('RGB', (80, 120), 'orange').save(buffer, format='PNG')
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.iter_content.return_value = [buffer.getvalue()]
+        handler = self.app.immich_handler
+        with patch.object(handler, '_make_request', return_value={'originalFileName': 'native.png'}), \
+             patch('requests.get', return_value=response):
+            success, path = handler.download_asset(ASSET, self.app.config.INPUT_FOLDER)
+        self.assertTrue(success)
+        self.assertTrue(path.endswith('.png'))
+        with Image.open(path) as image:
+            self.assertEqual(image.size, (80, 120))
+        self.assertEqual(self.files.get_filename_from_asset_id(ASSET), f'{ASSET}.png')
+
+    def test_interrupted_download_preserves_previous_cache(self):
+        handler = self.app.immich_handler
+        path = Path(self.app.config.INPUT_FOLDER) / f'{ASSET}.jpg'
+        original = path.read_bytes()
+        def chunks(**kwargs):
+            yield b'incomplete image'
+            raise ConnectionError('download interrupted')
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.iter_content.side_effect = chunks
+        with patch.object(handler, '_make_request', return_value={'originalFileName': 'original.jpg'}), \
+             patch('requests.get', return_value=response):
+            success, _ = handler.download_asset(ASSET, self.app.config.INPUT_FOLDER)
+        self.assertFalse(success)
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(sorted(p.name for p in path.parent.iterdir()), ['.metadata', f'{ASSET}.jpg'])
+
+    def test_converted_download_uses_upright_shared_renderer(self):
+        import io
+        from PIL import Image
+        image = Image.new('RGB', (160, 90), 'orange')
+        exif = Image.Exif()
+        exif[274] = 6
+        buffer = io.BytesIO()
+        image.save(buffer, format='JPEG', exif=exif)
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.iter_content.return_value = [buffer.getvalue()]
+        # The conversion branch depends on the source extension. A synthetic
+        # JPEG payload exercises it without a fixture HEIC encoder dependency.
+        with patch.object(self.app.immich_handler, '_make_request', return_value={'originalFileName': 'source.heic'}), \
+             patch('requests.get', return_value=response):
+            success, path = self.app.immich_handler.download_asset(ASSET, self.app.config.INPUT_FOLDER)
+        self.assertTrue(success)
+        with Image.open(path) as output:
+            self.assertEqual(output.size, (90, 160))
+            self.assertEqual(output.getexif()[274], 1)
+
+
+if __name__ == '__main__':
+    unittest.main()

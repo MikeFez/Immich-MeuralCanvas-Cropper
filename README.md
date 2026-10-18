@@ -60,6 +60,7 @@ A comprehensive web application designed to seamlessly crop images from Immich f
 
 2. **Create configuration**:
    ```bash
+   mkdir -p config
    cp config-example.yaml config/config.yaml
    ```
 
@@ -163,6 +164,7 @@ git clone https://github.com/your-repo/Immich-MeuralCanvas-Cropper.git
 cd Immich-MeuralCanvas-Cropper
 
 # Create and edit configuration
+mkdir -p config
 cp config-example.yaml config/config.yaml
 # Edit config/config.yaml with your Immich details
 
@@ -216,6 +218,7 @@ The application will be available at `http://localhost:5001`
 
 3. **Configure application**:
    ```bash
+   mkdir -p config
    cp config-example.yaml config/config.yaml
    # Edit config/config.yaml with your settings
    ```
@@ -226,7 +229,14 @@ The application will be available at `http://localhost:5001`
    python app.py
    ```
 
-The application will be available at `http://localhost:8085`
+The application will be available at `http://localhost:5000`.
+
+Local runs use the repository's `config/` directory; Docker uses `/config`.
+Set `CONFIG_DIR` to override the configuration and persistent data directory,
+or `APP_TMP_DIR` to override the disposable image cache. Crop coordinates and
+upload records persist together in `CONFIG_DIR/crops/metadata.json`. On startup, images sync
+in the background so an unavailable Immich server does not block the UI;
+use **Sync** to retry a failed connection.
 
 ## ⚙️ Configuration
 
@@ -312,82 +322,97 @@ meural:
 #### Quality Settings
 The application preserves image quality through:
 - LANCZOS resampling for high-quality resizing
-- EXIF data preservation
-- Optimal JPEG compression settings
+- One EXIF-orientation-aware renderer for editor crops, Meural previews, and uploads
+- Original EXIF dates, camera/GPS metadata, and ICC color profiles are retained;
+  orientation and pixel dimensions are corrected and stale embedded thumbnails removed
+- JPEG quality 95 with 4:4:4 chroma sampling
+
+The sidebar uses cached thumbnails up to 320 pixels, with stable versioned URLs
+and conditional HTTP requests. Original photos are fetched only for editing.
+Sync repairs missing or corrupt cached images and removes local entries that
+leave the source album. Saved crop coordinates remain available if an image is
+added back later. A failed album fetch never triggers cache removal.
 
 ## 💾 Storage & Data Persistence
 
 ### Crop Data Storage
-The application stores crop coordinates and metadata to ensure persistence:
+All persistent state lives in one file, **`/config/crops/metadata.json`**:
 
-**Location**: `/config/crops/metadata.json`
-
-**Format**:
 ```json
 {
   "crops": {
-    "asset-id-123": {
+    "<immich-asset-id>": {
       "portrait": {
-        "x": 720,
-        "y": 100,
-        "width": 863,
-        "height": 1537
+        "crop": { "x": 720, "y": 100, "width": 863, "height": 1537 },
+        "uploaded": {
+          "asset_id": "<uploaded-immich-asset-id>",
+          "crop": { "x": 720, "y": 100, "width": 863, "height": 1537 },
+          "at": "2026-10-17T19:52:38+00:00"
+        }
       },
       "landscape": {
-        "x": 0,
-        "y": 120,
-        "width": 2305,
-        "height": 1296
+        "crop": { "x": 0, "y": 120, "width": 2305, "height": 1296 }
       }
     }
   }
 }
 ```
 
+- `crop` is the saved selection in upright source-image pixels.
+- `uploaded` records the selection that was last uploaded to Immich. An image is
+  **completed** when every saved selection matches its upload record, so
+  re-cropping after an upload marks the image as pending again.
+- Deleting a crop keeps its upload record so a later upload still replaces the
+  previous copy.
+- Older installs that used `progress.json` and bare coordinates are migrated
+  automatically on startup; the old file is renamed to `progress.json.migrated`.
+
 ### On-Demand Image Generation
-The application generates cropped images dynamically when needed:
+Crops are never stored as image files. Previews, Meural postcards and uploads
+are all rendered from the source image and the saved coordinates by the same
+pipeline, so what you preview is exactly what gets uploaded.
 
-- **Individual Crops**: Images are generated and temporarily stored when creating crops for preview
-- **Batch Upload**: "Upload All" reads metadata and generates all crops on-demand during upload
-- **Temporary Storage**: Generated images are stored temporarily in `/output/` during processing
-- **Space Efficient**: No permanent storage of cropped images, saving disk space
-
-### Benefits of Metadata-Based Approach
-- **Storage Efficiency**: Only crop coordinates are permanently stored, not the full images
-- **Always Fresh**: Images are generated from current source data during upload
-- **Consistent Quality**: All images use the same processing pipeline regardless of when they were cropped
-- **Backup Safety**: Crop data survives application restarts and is easy to backup
-- **Version Control**: Track changes to crop coordinates without managing large image files
-- **Performance**: Faster backups and smaller persistent data footprint
+Re-uploading a crop uploads a new version to the output album, then moves the
+previous version to the Immich trash. This avoids the in-place replacement
+endpoint, which was removed in Immich v3. If Immich reports the new upload as a
+duplicate of the existing one, the existing copy is kept.
 
 ### Data Management
-- Crop metadata is automatically saved when crops are created
-- Cropped images are generated on-demand during individual cropping or batch upload
-- Only configuration and crop metadata need to be persisted across container updates:
-  ```bash
-  docker run -v /host/path/config:/config ...
-  ```
+Only the configuration directory needs to persist across container updates;
+the source-image and thumbnail cache under `APP_TMP_DIR` is rebuilt by Sync:
+```bash
+docker run -v /host/path/config:/config ...
+```
 
 ## 🔌 API Endpoints
 
-### Image Management
-- `GET /images` - List available images from Immich
-- `GET /image/{identifier}` - Serve individual image
-- `GET /crop-data/{identifier}/{orientation}` - Get saved crop coordinates
-- `POST /crop` - Process and save crop
+Images are always identified by their Immich asset ID (a UUID). Mutating
+endpoints take `{"identifier": "<asset-id>", ...}` and respond with the updated
+`image` record; errors are JSON `{"success": false, "error": "..."}`.
 
-### Batch Operations
-- `POST /upload-all` - Upload all completed crops to Immich
-- `POST /reset` - Reset processing status for an image
-- `GET /sync-immich` - Synchronize with Immich albums
+### Images
+- `GET /images`: cached source images with `crops` and `status`
+- `GET /image/{asset_id}`: source image
+- `GET /thumbnail/{asset_id}`: 320px thumbnail
+- `GET /output/{orientation}/{asset_id}`: saved crop rendered at frame size
+- `POST /crop`: save a crop (`orientation`, `crop`)
+- `DELETE /crop-data/{asset_id}/{orientation}`: delete one saved crop
+- `POST /reset`: delete both saved crops
 
-### Meural Integration
-- `POST /preview-meural` - Send image to Meural Canvas for preview
-- `GET /meural-devices` - List configured Meural devices
+### Immich
+- `POST /sync`: sync the input album into the local cache
+- `POST /complete`: upload all of an image's saved crops
+- `POST /upload-single`: upload one orientation (`orientation`)
+- `POST /upload-all`: upload every image with saved crops
+- `DELETE /delete-original`: remove an image from the input album (the photo stays in the library)
+
+### Meural
+- `GET /meural/devices`: configured devices
+- `POST /meural/preview`: send a crop to a device (`orientation`, `device_ip`, optional `use_temp` + `crop`)
 
 ### System
-- `GET /health` - Application health check
-- `GET /config` - Current configuration (sanitized)
+- `GET /dimensions`: configured frame sizes
+- `GET /health`: health check
 
 ## 🛠️ Development
 
@@ -492,16 +517,30 @@ tail -f /path/to/app/logs/application.log
 - Add comments for complex logic
 
 ### Testing
+
+Backend regressions use synthetic images, a temporary configuration, and mocked
+Immich responses. Install `requirements.txt`, then run:
+
 ```bash
-# Run Python tests
-python -m pytest tests/
-
-# Run JavaScript tests
-npm test
-
-# Integration tests
-python tests/integration_test.py
+python -m unittest discover -s tests -v
 ```
+
+For browser checks, install the locked dependencies (`npm ci`) and
+Google Chrome. Start the isolated fixture server in one terminal, then run the
+browser checks in another:
+
+```bash
+python tests/serve_fixture.py
+npm run test:browser
+```
+
+Set `PLAYWRIGHT_MODULE` to reuse an existing Playwright installation. Browser
+checks use `http://127.0.0.1:5087` and never contact your Immich server.
+
+CI runs backend, JavaScript syntax, and Chromium browser checks on pushes and
+pull requests. Publishing the Docker image from `main` requires those checks
+to pass. Browser dependencies are for testing only and are not included in the
+runtime image.
 
 ## 📄 License
 

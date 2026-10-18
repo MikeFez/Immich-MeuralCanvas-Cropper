@@ -1,0 +1,12 @@
+.git
+.github
+.env*
+config/
+config.yaml
+node_modules/
+tests/
+playwright-report/
+test-results/
+__pycache__/
+*.pyc
+.claude/

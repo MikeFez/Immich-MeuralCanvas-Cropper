@@ -8,6 +8,7 @@
  * Show the manage modal
  */
 function showManageModal() {
+    if (window.APP_STATE.cropBusy || window.APP_STATE.syncing) return;
     const modal = document.getElementById('manage-modal');
     if (!modal) return;
 
@@ -47,36 +48,20 @@ async function loadManageData() {
     emptyEl.style.display = 'none';
 
     try {
-        // Get all images and their metadata
-        const [imagesResponse, metadataResponse] = await Promise.all([
-            fetch('/images'),
-            fetch('/crop-data/all')
-        ]);
+        const images = await (await fetch('/images')).json();
+        window.APP_STATE.imageList = images;
+        renderImageList();
+        const processedImages = images.filter(image => image.crops.portrait || image.crops.landscape);
 
-        const images = await imagesResponse.json();
-        const allMetadata = await metadataResponse.json();
-
-        // Filter images that have at least one crop or are completed
-        const processedImages = images.filter(image => {
-            const identifier = image.asset_id || image.filename;
-            const metadata = allMetadata.crops && allMetadata.crops[identifier];
-            return metadata && (metadata.portrait || metadata.landscape);
-        });
-
+        tableBodyEl.innerHTML = '';
         if (processedImages.length === 0) {
             loadingEl.style.display = 'none';
             emptyEl.style.display = 'flex';
             return;
         }
 
-        // Clear existing table content
-        tableBodyEl.innerHTML = '';
-
         // Generate table rows
-        for (const image of processedImages) {
-            const row = await createManageTableRow(image, allMetadata);
-            tableBodyEl.appendChild(row);
-        }
+        tableBodyEl.append(...processedImages.map(createManageTableRow));
 
         // Show table
         loadingEl.style.display = 'none';
@@ -96,127 +81,54 @@ async function loadManageData() {
 /**
  * Create a table row for the manage interface
  */
-async function createManageTableRow(image, allMetadata) {
-    const identifier = image.asset_id || image.filename;
-    const displayName = image.original_filename || image.filename;
-    const metadata = allMetadata.crops && allMetadata.crops[identifier];
+function manageButton(className, label, action) {
+    const button = makeElement('button', `manage-action-btn ${className}`, label);
+    button.addEventListener('click', () => action(button));
+    return button;
+}
 
+function createManageTableRow(image) {
+    const identifier = image.asset_id;
+    const name = image.original_filename || image.filename;
+    const metadata = image.crops;
     const row = document.createElement('tr');
-    row.setAttribute('data-identifier', identifier);
-
-    // Original image column
-    const originalCol = document.createElement('td');
-    originalCol.className = 'original-column';
-    originalCol.innerHTML = `
-        <div class="manage-image-cell">
-            <img src="/image/${encodeURIComponent(identifier)}"
-                 alt="${displayName}"
-                 class="manage-image-preview"
-                 onerror="this.style.display='none'">
-            <div class="manage-image-info">
-                <div class="manage-image-filename">${truncateFilename(displayName, 25)}</div>
-                <div class="manage-image-dimensions">${image.width || '?'} × ${image.height || '?'}</div>
-            </div>
-            <div class="manage-image-actions">
-                <button class="manage-action-btn delete-original"
-                        onclick="deleteOriginalImage('${identifier}', '${displayName}')"
-                        title="Delete from source album">
-                    <i class="fas fa-trash"></i> Delete Original
-                </button>
-            </div>
-        </div>
-    `;
-
-    // Portrait column
-    const portraitCol = document.createElement('td');
-    portraitCol.className = 'portrait-column';
-    if (metadata && metadata.portrait) {
-        const portraitPath = `/output/portrait/${encodeURIComponent(identifier)}_portrait.jpg`;
-        portraitCol.innerHTML = `
-            <div class="manage-image-cell">
-                <img src="${portraitPath}"
-                     alt="Portrait crop"
-                     class="manage-image-preview"
-                     onerror="this.style.display='none'">
-                <div class="manage-image-info">
-                    <div class="manage-image-filename">Portrait Crop</div>
-                    <div class="manage-image-dimensions">${getDimensions('portrait').width} × ${getDimensions('portrait').height}</div>
-                </div>
-                <div class="manage-image-actions">
-                    <button class="manage-action-btn delete"
-                            onclick="deleteCropImage('${identifier}', 'portrait')"
-                            title="Delete portrait crop">
-                        <i class="fas fa-trash"></i> Delete
-                    </button>
-                    <button class="manage-action-btn reupload"
-                            onclick="reuploadCropImage('${identifier}', 'portrait')"
-                            title="Re-upload portrait crop">
-                        <i class="fas fa-cloud-upload-alt"></i> Re-upload
-                    </button>
-                    <button class="manage-action-btn recrop"
-                            onclick="recropImage('${identifier}', 'portrait')"
-                            title="Re-crop portrait">
-                        <i class="fas fa-crop-alt"></i> Re-crop
-                    </button>
-                </div>
-            </div>
-        `;
-    } else {
-        portraitCol.innerHTML = `
-            <div class="manage-no-image">
-                <i class="fas fa-mobile-alt"></i>
-                <span>No portrait crop</span>
-            </div>
-        `;
+    row.dataset.identifier = identifier;
+    const original = makeElement('td', 'original-column');
+    const cell = makeElement('div', 'manage-image-cell');
+    const preview = makeElement('img', 'manage-image-preview');
+    preview.src = thumbnailURL(image);
+    preview.alt = name;
+    const info = makeElement('div', 'manage-image-info');
+    info.append(makeElement('div', 'manage-image-filename', truncateFilename(name, 25)));
+    const actions = makeElement('div', 'manage-image-actions');
+    actions.append(manageButton('delete-original', 'Remove Original', button => deleteOriginalImage(identifier, button)));
+    cell.append(preview, info, actions);
+    original.append(cell);
+    row.append(original);
+    for (const orientation of ['portrait', 'landscape']) {
+        const column = makeElement('td', orientation + '-column');
+        if (!metadata[orientation]) {
+            column.append(makeElement('div', 'manage-no-image', `No ${orientation} crop`));
+        } else {
+            const cropCell = makeElement('div', 'manage-image-cell');
+            const cropPreview = makeElement('img', 'manage-image-preview');
+            cropPreview.src = previewURL(identifier, orientation, metadata[orientation]);
+            cropPreview.alt = orientation + ' crop';
+            const cropInfo = makeElement('div', 'manage-image-info');
+            const dimensions = getDimensions(orientation);
+            cropInfo.append(makeElement('div', 'manage-image-filename', orientation === 'portrait' ? 'Portrait Crop' : 'Landscape Crop'),
+                makeElement('div', 'manage-image-dimensions', `${dimensions.width} × ${dimensions.height}`));
+            const cropActions = makeElement('div', 'manage-image-actions');
+            cropActions.append(
+                manageButton('delete', 'Delete', () => deleteCropImage(identifier, orientation)),
+                manageButton('reupload', 'Re-upload', button => reuploadCropImage(identifier, orientation, button)),
+                manageButton('recrop', 'Re-crop', () => recropImage(identifier, orientation))
+            );
+            cropCell.append(cropPreview, cropInfo, cropActions);
+            column.append(cropCell);
+        }
+        row.append(column);
     }
-
-    // Landscape column
-    const landscapeCol = document.createElement('td');
-    landscapeCol.className = 'landscape-column';
-    if (metadata && metadata.landscape) {
-        const landscapePath = `/output/landscape/${encodeURIComponent(identifier)}_landscape.jpg`;
-        landscapeCol.innerHTML = `
-            <div class="manage-image-cell">
-                <img src="${landscapePath}"
-                     alt="Landscape crop"
-                     class="manage-image-preview"
-                     onerror="this.style.display='none'">
-                <div class="manage-image-info">
-                    <div class="manage-image-filename">Landscape Crop</div>
-                    <div class="manage-image-dimensions">${getDimensions('landscape').width} × ${getDimensions('landscape').height}</div>
-                </div>
-                <div class="manage-image-actions">
-                    <button class="manage-action-btn delete"
-                            onclick="deleteCropImage('${identifier}', 'landscape')"
-                            title="Delete landscape crop">
-                        <i class="fas fa-trash"></i> Delete
-                    </button>
-                    <button class="manage-action-btn reupload"
-                            onclick="reuploadCropImage('${identifier}', 'landscape')"
-                            title="Re-upload landscape crop">
-                        <i class="fas fa-cloud-upload-alt"></i> Re-upload
-                    </button>
-                    <button class="manage-action-btn recrop"
-                            onclick="recropImage('${identifier}', 'landscape')"
-                            title="Re-crop landscape">
-                        <i class="fas fa-crop-alt"></i> Re-crop
-                    </button>
-                </div>
-            </div>
-        `;
-    } else {
-        landscapeCol.innerHTML = `
-            <div class="manage-no-image">
-                <i class="fas fa-desktop"></i>
-                <span>No landscape crop</span>
-            </div>
-        `;
-    }
-
-    row.appendChild(originalCol);
-    row.appendChild(portraitCol);
-    row.appendChild(landscapeCol);
-
     return row;
 }
 
@@ -229,28 +141,13 @@ async function deleteCropImage(identifier, orientation) {
     }
 
     try {
-        const response = await fetch(`/crop-data/${encodeURIComponent(identifier)}/${orientation}`, {
-            method: 'DELETE'
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-            // Refresh the manage table
-            await loadManageData();
-
-            // Update the main UI if the current image is affected
-            if (window.APP_STATE.currentImage &&
-                (window.APP_STATE.currentImage.asset_id === identifier ||
-                 window.APP_STATE.currentImage.filename === identifier)) {
-                await updateImageStatusInUI(window.APP_STATE.currentImage);
-            }
-
-            // Show success message
-            showManageNotification(`${orientation} crop deleted successfully`, 'success');
-        } else {
-            showManageNotification(`Error deleting ${orientation} crop: ${result.error || 'Unknown error'}`, 'error');
+        await deleteCropMetadata(identifier, orientation);
+        await loadManageData();
+        if (window.APP_STATE.currentImage?.asset_id === identifier) {
+            window.APP_STATE[orientation + 'Crop'] = { x: 0, y: 0, width: 0, height: 0 };
+            clearPreviewImage(orientation);
         }
+        showManageNotification(`${orientation} crop deleted successfully`, 'success');
     } catch (error) {
         console.error(`Error deleting ${orientation} crop:`, error);
         showManageNotification(`Error deleting ${orientation} crop: ${error.message}`, 'error');
@@ -260,42 +157,24 @@ async function deleteCropImage(identifier, orientation) {
 /**
  * Re-upload a crop image to Immich
  */
-async function reuploadCropImage(identifier, orientation) {
+async function reuploadCropImage(identifier, orientation, button) {
     if (!confirm(`Are you sure you want to re-upload the ${orientation} crop to Immich?`)) {
         return;
     }
 
+    const originalContent = button?.innerHTML;
     try {
-        // Find the button that was clicked and show loading state
-        const button = event.target.closest('.manage-action-btn');
-        const originalContent = button.innerHTML;
-        button.disabled = true;
-        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
+        // Show loading state
+        if (button) button.disabled = true;
+        if (button) button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
 
-        const response = await fetch('/upload-single', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                identifier: identifier,
-                orientation: orientation
-            })
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-            showManageNotification(`${orientation} crop uploaded successfully`, 'success');
-        } else {
-            showManageNotification(`Error uploading ${orientation} crop: ${result.error || 'Unknown error'}`, 'error');
-        }
+        await postJSON('/upload-single', { identifier, orientation });
+        showManageNotification(`${orientation} crop uploaded successfully`, 'success');
     } catch (error) {
         console.error(`Error uploading ${orientation} crop:`, error);
         showManageNotification(`Error uploading ${orientation} crop: ${error.message}`, 'error');
     } finally {
         // Reset button state
-        const button = event.target.closest('.manage-action-btn');
         if (button) {
             button.disabled = false;
             button.innerHTML = originalContent;
@@ -307,78 +186,41 @@ async function reuploadCropImage(identifier, orientation) {
  * Re-crop an image (opens the crop interface)
  */
 function recropImage(identifier, orientation) {
-    // Close the manage modal
+    if (window.APP_STATE.cropBusy || window.APP_STATE.syncing) return;
     hideManageModal();
-
-    // Select the image in the main interface
-    selectImage(identifier);
-
-    // Wait for image to load, then navigate to appropriate stage
-    setTimeout(() => {
-        if (orientation === 'portrait') {
-            window.APP_STATE.currentStage = 1;
-        } else {
-            window.APP_STATE.currentStage = 2;
-        }
-        updateStage();
-    }, 500);
+    selectImage(identifier, orientation === 'portrait' ? 1 : 2);
 }
 
 /**
  * Delete original image from source album
  */
-async function deleteOriginalImage(identifier, displayName) {
+async function deleteOriginalImage(identifier, button) {
     const confirmed = confirm(
-        `Are you sure you want to delete "${displayName}" from the source album?\n\n` +
-        `This will permanently remove the original image from Immich. This action cannot be undone.`
+        'Remove this image from the source album? The original photo will remain in your Immich library.'
     );
 
     if (!confirmed) return;
 
+    const originalContent = button?.innerHTML;
     try {
-        // Find the button that was clicked and show loading state
-        const button = event.target.closest('.manage-action-btn');
-        const originalContent = button.innerHTML;
-        button.disabled = true;
-        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+        // Show loading state
+        if (button) button.disabled = true;
+        if (button) button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
 
-        const response = await fetch('/delete-original', {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                identifier: identifier
-            })
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-            // Remove the row from the table
-            const row = document.querySelector(`tr[data-identifier="${identifier}"]`);
-            if (row) {
-                row.remove();
-            }
-
-            // Update image list in main app
-            if (window.APP_STATE.imageList) {
-                window.APP_STATE.imageList = window.APP_STATE.imageList.filter(img =>
-                    (img.asset_id !== identifier) && (img.filename !== identifier)
-                );
-                renderImageList();
-            }
-
-            showManageNotification('Original image deleted successfully', 'success');
-        } else {
-            showManageNotification(`Error deleting original image: ${result.error || 'Unknown error'}`, 'error');
+        await postJSON('/delete-original', { identifier }, 'DELETE');
+        document.querySelector(`tr[data-identifier="${identifier}"]`)?.remove();
+        window.APP_STATE.imageList = window.APP_STATE.imageList.filter(img => img.asset_id !== identifier);
+        renderImageList();
+        if (window.APP_STATE.currentImage?.asset_id === identifier) {
+            window.APP_STATE.currentImage = null;
+            showView('no-image-view');
         }
+        showManageNotification('Removed from source album', 'success');
     } catch (error) {
         console.error('Error deleting original image:', error);
         showManageNotification(`Error deleting original image: ${error.message}`, 'error');
     } finally {
         // Reset button state
-        const button = event.target.closest('.manage-action-btn');
         if (button) {
             button.disabled = false;
             button.innerHTML = originalContent;

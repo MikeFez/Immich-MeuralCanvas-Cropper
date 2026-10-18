@@ -9,6 +9,7 @@ async function initializeApp() {
         return;
     }
 
+    await (window.configReady || (window.configReady = initializeConfig()));
     console.log('Starting application initialization...');
 
     // 1. Cache DOM elements
@@ -61,77 +62,41 @@ async function initializeApp() {
         button._hasHandler = true;
     };
 
-    setupButtonHandler(window.ELEMENTS.btnCropEl, () => {
-        if (!window.APP_STATE.syncing) {
-            if (window.APP_STATE.currentStage === 1) {
-                performCrop('portrait');
-                window.APP_STATE.currentStage = 2;
-            } else if (window.APP_STATE.currentStage === 2) {
-                performCrop('landscape');
-                window.APP_STATE.currentStage = 3;
-            }
+    async function runCropAction(action) {
+        if (window.APP_STATE.syncing || window.APP_STATE.cropBusy) return;
+        window.APP_STATE.cropBusy = true;
+        const controls = ['btnCropEl', 'btnSkipEl', 'btnBackEl', 'btnResetEl', 'btnSaveEl',
+            'btnImmichSyncEl', 'btnImmichUploadEl', 'btnMeuralPreviewEl'];
+        const buttons = controls.map(key => [window.ELEMENTS[key], window.ELEMENTS[key]?.disabled]);
+        buttons.forEach(([button]) => { if (button) button.disabled = true; });
+        try {
+            await action();
+        } catch (error) {
+            alert(error.message || String(error));
+        } finally {
+            window.APP_STATE.cropBusy = false;
+            buttons.forEach(([button, disabled]) => { if (button) button.disabled = disabled; });
             updateStage();
         }
-    });
+    }
 
-    setupButtonHandler(window.ELEMENTS.btnSkipEl, () => {
-        if (!window.APP_STATE.syncing) {
-            const currentImage = window.APP_STATE.currentImage;
-            if (!currentImage) return;
+    setupButtonHandler(window.ELEMENTS.btnCropEl, () => runCropAction(async () => {
+        const stage = window.APP_STATE.currentStage;
+        if (stage !== 1 && stage !== 2) return;
+        await performCrop(stage === 1 ? 'portrait' : 'landscape');
+        window.APP_STATE.currentStage = stage + 1;
+    }));
 
-            const identifier = currentImage.asset_id || currentImage.filename;
-
-            if (window.APP_STATE.currentStage === 1) {
-                // Reset local state
-                window.APP_STATE.portraitCrop = { x: 0, y: 0, width: 0, height: 0 };
-
-                // Clear portrait preview image
-                clearPreviewImage('portrait');
-
-                // Delete portrait metadata from backend
-                deleteCropMetadata(identifier, 'portrait')
-                    .then(result => {
-                        if (!result.success) {
-                            console.warn('Failed to delete portrait metadata:', result.message || result.error);
-                        } else {
-                            // Update image status in UI if needed
-                            updateImageStatusInUI(currentImage);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error deleting portrait metadata:', error);
-                    });
-
-                // Always go to landscape stage after skipping portrait
-                window.APP_STATE.currentStage = 2;
-                updateStage();
-            } else if (window.APP_STATE.currentStage === 2) {
-                // Reset local state
-                window.APP_STATE.landscapeCrop = { x: 0, y: 0, width: 0, height: 0 };
-
-                // Clear landscape preview image
-                clearPreviewImage('landscape');
-
-                // Delete landscape metadata from backend
-                deleteCropMetadata(identifier, 'landscape')
-                    .then(result => {
-                        if (!result.success) {
-                            console.warn('Failed to delete landscape metadata:', result.message || result.error);
-                        } else {
-                            // Update image status in UI if needed
-                            updateImageStatusInUI(currentImage);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error deleting landscape metadata:', error);
-                    });
-
-                // Always go to review stage after skipping landscape
-                window.APP_STATE.currentStage = 3;
-                updateStage();
-            }
-        }
-    });
+    setupButtonHandler(window.ELEMENTS.btnSkipEl, () => runCropAction(async () => {
+        const currentImage = window.APP_STATE.currentImage;
+        const stage = window.APP_STATE.currentStage;
+        if (!currentImage || (stage !== 1 && stage !== 2)) return;
+        const orientation = stage === 1 ? 'portrait' : 'landscape';
+        await deleteCropMetadata(currentImage.asset_id, orientation);
+        window.APP_STATE[orientation + 'Crop'] = { x: 0, y: 0, width: 0, height: 0 };
+        clearPreviewImage(orientation);
+        window.APP_STATE.currentStage = stage + 1;
+    }));
 
     setupButtonHandler(window.ELEMENTS.btnBackEl, () => {
         if (!window.APP_STATE.syncing) {
@@ -140,7 +105,6 @@ async function initializeApp() {
             } else if (window.APP_STATE.currentStage === 3) {
                 // When going back from review stage to landscape crop stage,
                 // set viewport resizing flag to force crop rectangle to be properly sized
-                window._viewportResizing = true;
                 window.APP_STATE.currentStage = 2;
                 window.ELEMENTS.btnSkipEl.style.display = 'block';
             }
@@ -149,27 +113,15 @@ async function initializeApp() {
         }
     });
 
-    setupButtonHandler(window.ELEMENTS.btnResetEl, () => {
-        if (!window.APP_STATE.syncing) {
-            resetImage();
-        }
-    });
+    setupButtonHandler(window.ELEMENTS.btnResetEl, () => runCropAction(() => resetImage()));
 
-    setupButtonHandler(window.ELEMENTS.btnSaveEl, () => {
-        if (!window.APP_STATE.syncing) {
-            // Check if both orientations are skipped
-            const hasPortrait = window.APP_STATE.portraitCrop.width > 0;
-            const hasLandscape = window.APP_STATE.landscapeCrop.width > 0;
-
-            if (!hasPortrait && !hasLandscape) {
-                // Both orientations skipped - navigate to next image
-                navigateToNextImage();
-            } else {
-                // At least one orientation has crops - complete the image normally
-                completeImage();
-            }
+    setupButtonHandler(window.ELEMENTS.btnSaveEl, () => runCropAction(async () => {
+        if (!window.APP_STATE.portraitCrop.width && !window.APP_STATE.landscapeCrop.width) {
+            navigateToNextImage();
+        } else {
+            await completeImage();
         }
-    });
+    }));
 
     // Setup Immich sync button handler
     setupButtonHandler(window.ELEMENTS.btnImmichSyncEl, () => {
@@ -189,6 +141,7 @@ async function initializeApp() {
         if (!window.APP_STATE.syncing && window.APP_STATE.initialized) {
             window.ELEMENTS.btnImmichUploadEl.disabled = true;
             uploadAllToImmich()
+                .catch(() => {}) // The API service already reports upload errors.
                 .finally(() => {
                     window.ELEMENTS.btnImmichUploadEl.disabled = false;
                 });
@@ -202,16 +155,7 @@ async function initializeApp() {
         }
     });
 
-    // Debounced resize handler
-    const debouncedForceImageFit = debounce(() => {
-        if (window.ELEMENTS.currentImageEl?.complete && !window.APP_STATE.syncing) {
-            forceImageFit();
-        }
-    }, 250);
-
-    // Responsive event listeners
-    window.addEventListener('resize', debouncedForceImageFit);
-    window.addEventListener('orientationchange', () => setTimeout(debouncedForceImageFit, 300));
+    setupEditorResize();
 
     // 4. Load initial images - WITHOUT sync
     try {
@@ -238,21 +182,6 @@ async function initializeApp() {
         // Set initialized state
         window.APP_STATE.initialized = true;
         console.log('Application initialization complete');
-
-        // Initialize filter
-        initializeFilter();
-
-        // Add click event delegation for the image grid to ensure it works with the landing page
-        document.getElementById('image-grid').addEventListener('click', (e) => {
-            const gridItem = e.target.closest('.image-grid-item');
-            if (gridItem && !window.APP_STATE.syncing) {
-                const identifier = gridItem.getAttribute('data-identifier');
-                if (identifier) {
-                    selectImage(identifier);
-                }
-            }
-        });
-
     } catch (error) {
         console.error('Failed to initialize:', error);
         if (window.ELEMENTS.imageGridEl) {
@@ -262,45 +191,8 @@ async function initializeApp() {
     }
 }
 
-// Utility function for debouncing
-function debounce(fn, delay) {
-    let timeoutId;
-    return (...args) => {
-        if (timeoutId) clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => fn(...args), delay);
-    };
-}
-
-// Initialize only once when DOM is ready
-let initStarted = false;
-function safeInitialize() {
-    if (initStarted || window.APP_STATE.initialized) {
-        console.log('Initialization already in progress or complete');
-        return;
-    }
-
-    initStarted = true;
-    initializeApp().catch(error => {
-        console.error('Initialization failed:', error);
-        initStarted = false;
-    });
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', safeInitialize, { once: true });
-} else {
-    safeInitialize();
-}
-
-// Initialize filter
-function initializeFilter() {
-    if (document.getElementById('show-unprocessed-only')) {
-        setupUnprocessedFilter();
-    } else {
-        // If filter not found in DOM yet, retry after a short delay
-        setTimeout(initializeFilter, 100);
-    }
-}
+// Scripts load at the end of <body>; initializeApp itself refuses a second run.
+initializeApp().catch(error => console.error('Initialization failed:', error));
 
 /**
  * Navigate to the next image in the list
@@ -313,7 +205,7 @@ function navigateToNextImage() {
 
     // Find the current image index
     const currentIndex = imageList.findIndex(img =>
-        (img.asset_id === currentImage.asset_id) || (img.filename === currentImage.filename)
+        img.asset_id === currentImage.asset_id
     );
 
     if (currentIndex === -1) {
@@ -330,9 +222,7 @@ function navigateToNextImage() {
         if (!showOnlyUnprocessed) return true;
 
         // When filter is active, only show unprocessed images
-        const identifier = image.asset_id || image.filename;
-        const gridItem = document.querySelector(`[data-identifier="${identifier}"]`);
-        return gridItem && !gridItem.classList.contains('filtered');
+        return image.status !== 'completed';
     }
 
     // Go to the next image in sequence
@@ -358,7 +248,7 @@ function navigateToNextImage() {
             // Found a visible image, select it
             requestAnimationFrame(() => {
                 if (!window.APP_STATE.syncing) {
-                    selectImage(candidateImage.asset_id || candidateImage.filename);
+                    selectImage(candidateImage.asset_id);
                 }
             });
             return;

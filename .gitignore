@@ -2,3 +2,7 @@ meural-cropper/config/crops/metadata.json
 config/
 run-script.sh
 *.pyc
+node_modules/
+__pycache__/
+playwright-report/
+test-results/

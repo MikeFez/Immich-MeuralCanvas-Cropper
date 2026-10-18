@@ -1,42 +1,85 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-name: Create and publish a Docker image
+name: Test and publish
 
 on:
   push:
-    branches: ['main']
+  pull_request:
+
+permissions:
+  contents: read
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: pip install -r requirements.txt
+      - run: npm ci
+      - name: Backend regressions
+        run: python -m unittest discover -s tests -v
+      - name: JavaScript syntax
+        run: |
+          for file in app/static/js/*.js tests/*.cjs; do
+            node --check "$file"
+          done
+      - run: npx playwright install --with-deps chromium
+      - name: Browser regressions against synthetic fixtures
+        env:
+          CI: 'true'
+        run: |
+          python -B tests/serve_fixture.py > /tmp/meural-fixture.log 2>&1 &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid" 2>/dev/null || true' EXIT
+          python - <<'PY'
+          import time
+          import urllib.request
+          for attempt in range(100):
+              try:
+                  with urllib.request.urlopen('http://127.0.0.1:5087/health', timeout=1) as response:
+                      if response.status == 200:
+                          break
+              except OSError:
+                  time.sleep(0.1)
+          else:
+              raise SystemExit('Fixture server failed to start')
+          PY
+          npm run test:browser
+      - name: Fixture logs on failure
+        if: failure()
+        run: cat /tmp/meural-fixture.log 2>/dev/null || true
+
   build-and-push-image:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
-
+      - uses: actions/checkout@v4
       - name: Log in to the Container registry
         uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-
       - name: Build and push Docker image
         uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
         with:

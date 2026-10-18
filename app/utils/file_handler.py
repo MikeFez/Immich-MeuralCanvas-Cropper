@@ -1,277 +1,214 @@
+"""Persistent crop/upload state and the disposable source-image cache.
+
+crops/metadata.json holds, per asset and orientation:
+    {"crop": {x, y, width, height}, "uploaded": {"asset_id", "crop", "at"}}
+"crop" is the saved selection; "uploaded" records what was last sent to Immich.
+An orientation is up to date when both crops are equal, so re-cropping after an
+upload makes the image pending again without a separate progress store.
+"""
 import os
 import json
 import logging
-from config import PROGRESS_FILE, INPUT_FOLDER
+import tempfile
+import threading
+from datetime import datetime, timezone
+from config import INPUT_FOLDER, CROP_METADATA_FILE, LEGACY_PROGRESS_FILE, THUMBNAIL_FOLDER, ORIENTATIONS
+
+METADATA_DIR = os.path.join(INPUT_FOLDER, ".metadata")
+
+state_lock = threading.RLock()
+_image_locks = {}
+_image_locks_lock = threading.Lock()
 
 
-# Keep track of processed images
-def load_progress():
-    """Load progress data from JSON file"""
-    if os.path.exists(PROGRESS_FILE):
-        with open(PROGRESS_FILE, "r") as f:
-            return json.load(f)
-    return {}
+def image_lock(asset_id):
+    """Serialize changes to one image without blocking reads or other images."""
+    with _image_locks_lock:
+        return _image_locks.setdefault(asset_id, threading.RLock())
 
 
-def save_progress(processed_images):
-    """Save progress data to JSON file"""
-    with open(PROGRESS_FILE, "w") as f:
-        json.dump(processed_images, f)
-
-
-def get_image_list(processed_images):
-    """Get list of images with their processing status
-
-    Images are sourced from Immich and stored in INPUT_FOLDER during sync.
-
-    Returns:
-        list: List of dictionaries with asset_id, filename, and status
-    """
-    images = []
-    # Check if directory exists first
-    if os.path.exists(INPUT_FOLDER):
-        # Check if metadata folder exists
-        metadata_dir = os.path.join(INPUT_FOLDER, ".metadata")
-        if not os.path.exists(metadata_dir):
-            # Fallback to old method if no metadata folder exists yet
-            for filename in sorted(os.listdir(INPUT_FOLDER)):
-                if filename.lower().endswith((".png", ".jpg", ".jpeg")):
-                    status = processed_images.get(filename, "unprocessed")
-                    images.append({"filename": filename, "status": status})
-            return images
-
-        # Load metadata for each image
-        for metadata_file in sorted(os.listdir(metadata_dir)):
-            if not metadata_file.endswith(".json"):
-                continue
-
-            asset_id = metadata_file.replace(".json", "")
-
-            try:
-                with open(os.path.join(metadata_dir, metadata_file), "r") as f:
-                    metadata = json.load(f)
-
-                filename = os.path.basename(metadata.get("file_path", ""))
-                original_filename = metadata.get("original_filename", "")
-
-                if not filename:
-                    continue
-
-                # Check if file exists
-                file_path = os.path.join(INPUT_FOLDER, filename)
-                if not os.path.exists(file_path):
-                    continue
-
-                # Get status from processed_images using asset_id as key
-                status = processed_images.get(asset_id, "unprocessed")
-
-                images.append(
-                    {
-                        "asset_id": asset_id,
-                        "filename": filename,
-                        "original_filename": original_filename,
-                        "status": status,
-                    }
-                )
-            except Exception as e:
-                logging.error(f"Error loading metadata for {asset_id}: {e}")
-
-    return images
-
-
-def save_crop_data_json(asset_id, portrait_crop=None, landscape_crop=None):
-    """Save crop data to metadata.json file in config directory.
-
-    Args:
-        asset_id (str): Immich asset ID
-        portrait_crop (dict): Portrait crop data (x, y, width, height)
-        landscape_crop (dict): Landscape crop data (x, y, width, height)
-
-    Returns:
-        bool: Success status
-    """
+def write_json_atomic(path, data):
+    """Replace a JSON document only after the complete new version is written."""
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    temp_path = None
     try:
-        # Create the config crops directory if it doesn't exist
-        config_crops_dir = "/config/crops"
-        os.makedirs(config_crops_dir, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", dir=directory, delete=False) as f:
+            temp_path = f.name
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
-        json_path = os.path.join(config_crops_dir, "metadata.json")
 
-        # Read existing metadata
-        metadata = {"crops": {}}
-        if os.path.exists(json_path):
-            with open(json_path, "r") as f:
-                try:
-                    metadata = json.load(f)
-                except json.JSONDecodeError:
-                    metadata = {"crops": {}}
+# --- Crop and upload state -------------------------------------------------
 
-        # Initialize crop data for this asset if it doesn't exist
-        if asset_id not in metadata["crops"]:
-            metadata["crops"][asset_id] = {}
+def read_all_crop_metadata():
+    """Read all state without treating corrupt data as an empty store."""
+    with state_lock:
+        if not os.path.exists(CROP_METADATA_FILE):
+            return {}
+        with open(CROP_METADATA_FILE) as f:
+            metadata = json.load(f)
+        if not isinstance(metadata, dict) or not isinstance(metadata.get("crops"), dict):
+            raise ValueError("Invalid crop metadata: expected a crops object")
+        return metadata["crops"]
 
-        # Update with new data
-        if portrait_crop:
-            metadata["crops"][asset_id]["portrait"] = portrait_crop
-        if landscape_crop:
-            metadata["crops"][asset_id]["landscape"] = landscape_crop
 
-        # Save the data
-        with open(json_path, "w") as f:
-            json.dump(metadata, f, indent=2)
+def _update_entry(asset_id, change):
+    """Apply change(entry) to one asset's state and persist it atomically."""
+    with state_lock:
+        crops = read_all_crop_metadata()
+        entry = crops.setdefault(asset_id, {})
+        change(entry)
+        for orientation in ORIENTATIONS:
+            if orientation in entry and not entry[orientation]:
+                del entry[orientation]
+        if not entry:
+            del crops[asset_id]
+        write_json_atomic(CROP_METADATA_FILE, {"crops": crops})
 
-        logging.debug(f"Saved crop data to metadata.json for asset {asset_id}")
+
+def saved_crop(entry, orientation):
+    return (entry.get(orientation) or {}).get("crop")
+
+
+def save_crop(asset_id, orientation, crop):
+    """Persist one selection, keeping existing data intact on write failure."""
+    try:
+        _update_entry(asset_id, lambda entry: entry.setdefault(orientation, {}).update(crop=crop))
         return True
-    except Exception as e:
-        logging.error(f"Error saving crop data to JSON: {str(e)}")
+    except (OSError, ValueError, TypeError):
+        logging.exception("Could not save crop metadata for %s", asset_id)
         return False
 
 
-def read_crop_data_json(asset_id, orientation):
-    """Read crop data from metadata.json file.
+def delete_crops(asset_id, orientation=None):
+    """Remove selections; upload records stay so a later upload still replaces the old copy."""
+    def change(entry):
+        for key in [orientation] if orientation else ORIENTATIONS:
+            (entry.get(key) or {}).pop("crop", None)
+    _update_entry(asset_id, change)
 
-    Args:
-        asset_id (str): Immich asset ID
-        orientation (str): Either 'portrait' or 'landscape'
 
-    Returns:
-        dict: Crop data with x, y, width, height keys or None if not found
-    """
+def mark_uploaded(asset_id, orientation, remote_id, crop):
+    """Record which selection the Immich copy was rendered from."""
+    record = {"asset_id": remote_id, "crop": crop, "at": datetime.now(timezone.utc).isoformat()}
+    _update_entry(asset_id, lambda entry: entry.setdefault(orientation, {}).update(uploaded=record))
+
+
+def image_status(entry):
+    """'completed' once every saved selection is in Immich, else which crops exist."""
+    saved = [o for o in ORIENTATIONS if saved_crop(entry, o)]
+    if not saved:
+        return "unprocessed"
+    if all((entry[o].get("uploaded") or {}).get("crop") == entry[o]["crop"] for o in saved):
+        return "completed"
+    return "both" if len(saved) == 2 else saved[0]
+
+
+def migrate_legacy_state():
+    """Convert {orientation: crop} entries and progress.json "completed" flags once."""
     try:
-        json_path = os.path.join("/config/crops", "metadata.json")
-
-        if not os.path.exists(json_path):
-            logging.debug("No metadata.json file found")
-            return None
-
-        with open(json_path, "r") as f:
-            metadata = json.load(f)
-
-        if (
-            asset_id in metadata.get("crops", {})
-            and orientation in metadata["crops"][asset_id]
-        ):
-            return metadata["crops"][asset_id][orientation]
-        return None
-    except Exception as e:
-        logging.error(f"Error reading crop data from JSON: {str(e)}")
-        return None
-
-
-def read_all_crop_metadata():
-    """Read all crop metadata from metadata.json file.
-
-    Returns:
-        dict: All crop metadata organized by asset_id and orientation
-    """
-    try:
-        json_path = os.path.join("/config/crops", "metadata.json")
-
-        if not os.path.exists(json_path):
-            logging.debug("No metadata.json file found")
-            return {"crops": {}}
-
-        with open(json_path, "r") as f:
-            metadata = json.load(f)
-
-        return metadata.get("crops", {})
-    except Exception as e:
-        logging.error(f"Error reading all crop metadata from JSON: {str(e)}")
-        return {"crops": {}}
+        with state_lock:
+            crops = read_all_crop_metadata()
+            progress = {}
+            if os.path.exists(LEGACY_PROGRESS_FILE):
+                with open(LEGACY_PROGRESS_FILE) as f:
+                    progress = json.load(f)
+            legacy = any("x" in (entry.get(o) or {}) for entry in crops.values() for o in ORIENTATIONS)
+            if not legacy and not progress:
+                return
+            for asset_id, entry in crops.items():
+                for orientation in ORIENTATIONS:
+                    value = entry.get(orientation)
+                    if value and "x" in value:
+                        entry[orientation] = value = {"crop": value}
+                    if value and value.get("crop") and progress.get(asset_id) == "completed":
+                        value.setdefault("uploaded", {"asset_id": None, "crop": value["crop"], "at": None})
+            write_json_atomic(CROP_METADATA_FILE, {"crops": crops})
+            if os.path.exists(LEGACY_PROGRESS_FILE):
+                os.replace(LEGACY_PROGRESS_FILE, LEGACY_PROGRESS_FILE + ".migrated")
+            logging.info("Migrated crop metadata and progress to the combined format")
+    except (OSError, ValueError, TypeError, AttributeError):
+        logging.exception("Could not migrate legacy crop state; leaving files untouched")
 
 
-def get_asset_id_from_filename(filename):
-    """Get asset ID from filename.
-
-    This is a helper function for backward compatibility during the transition to asset IDs.
-    Checks if filename is an asset ID directly, or looks up metadata.
-
-    Args:
-        filename (str): Filename or asset ID
-
-    Returns:
-        str: Asset ID if found, None otherwise
-    """
-    # Check if this is already an asset ID (no extension)
-    if "." not in filename:
-        return filename
-
-    # Check if metadata is available
-    metadata_dir = os.path.join(INPUT_FOLDER, ".metadata")
-    if not os.path.exists(metadata_dir):
-        return None
-
-    # Try to find metadata file with this filename
-    for metadata_file in os.listdir(metadata_dir):
-        if not metadata_file.endswith(".json"):
-            continue
-
-        try:
-            with open(os.path.join(metadata_dir, metadata_file), "r") as f:
-                metadata = json.load(f)
-
-            file_path = metadata.get("file_path", "")
-            if os.path.basename(file_path) == filename:
-                return metadata.get("asset_id")
-        except Exception as e:
-            logging.error(f"Error reading metadata file {metadata_file}: {e}")
-
-    return None
-
+# --- Source image cache ------------------------------------------------------
 
 def get_filename_from_asset_id(asset_id):
-    """Get filename from asset ID using metadata.
-
-    Args:
-        asset_id (str): Immich asset ID
-
-    Returns:
-        str: Filename if found, None otherwise
-    """
-    metadata_file = os.path.join(INPUT_FOLDER, ".metadata", f"{asset_id}.json")
-
-    if not os.path.exists(metadata_file):
-        return None
-
+    """Cached source filename for an asset, or None when it is not in the source album."""
     try:
-        with open(metadata_file, "r") as f:
-            metadata = json.load(f)
-
-        file_path = metadata.get("file_path", "")
-        return os.path.basename(file_path) if file_path else None
-    except Exception as e:
-        logging.error(f"Error reading metadata for asset ID {asset_id}: {e}")
+        with open(os.path.join(METADATA_DIR, f"{asset_id}.json")) as f:
+            file_path = json.load(f).get("file_path", "")
+        return os.path.basename(file_path) or None
+    except (OSError, ValueError, AttributeError):
         return None
 
 
-def get_asset_mapping():
-    """Get mapping between asset IDs and filenames.
+def source_version(filename):
+    """Stable cache version that changes only when the source file changes."""
+    stat = os.stat(os.path.join(INPUT_FOLDER, filename))
+    return f'{stat.st_mtime_ns:x}-{stat.st_size:x}'
 
-    Returns:
-        dict: Dictionary mapping asset IDs to filenames and vice versa
-    """
-    mapping = {"asset_to_file": {}, "file_to_asset": {}}
 
-    metadata_dir = os.path.join(INPUT_FOLDER, ".metadata")
-    if not os.path.exists(metadata_dir):
-        return mapping
+def remove_cached_image(asset_id):
+    """Remove disposable source/thumbnail files, retaining saved crop coordinates."""
+    with image_lock(asset_id):
+        filename = get_filename_from_asset_id(asset_id)
+        paths = [os.path.join(METADATA_DIR, f'{asset_id}.json')]
+        if filename:
+            paths.append(os.path.join(INPUT_FOLDER, filename))
+        if os.path.isdir(THUMBNAIL_FOLDER):
+            paths.extend(os.path.join(THUMBNAIL_FOLDER, name) for name in os.listdir(THUMBNAIL_FOLDER)
+                         if name.startswith(f'{asset_id}_'))
+        for path in paths:
+            if os.path.isfile(path):
+                os.remove(path)
 
-    for metadata_file in os.listdir(metadata_dir):
-        if not metadata_file.endswith(".json"):
+
+def _describe(asset_id, source, entry):
+    filename = os.path.basename(source.get("file_path", ""))
+    if not filename:
+        raise ValueError("metadata has no file_path")
+    return {
+        "asset_id": asset_id,
+        "filename": filename,
+        "original_filename": source.get("original_filename", ""),
+        "source_version": source_version(filename),
+        "crops": {o: saved_crop(entry, o) for o in ORIENTATIONS},
+        "status": image_status(entry),
+    }
+
+
+def get_image(asset_id):
+    """One cached source image with its crops and status, or None."""
+    try:
+        with open(os.path.join(METADATA_DIR, f"{asset_id}.json")) as f:
+            source = json.load(f)
+        return _describe(asset_id, source, read_all_crop_metadata().get(asset_id, {}))
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def get_image_list():
+    """Every cached source image with its crops and status, sorted by asset ID."""
+    images = []
+    all_crops = read_all_crop_metadata()
+    if not os.path.isdir(METADATA_DIR):
+        return images
+    for name in sorted(os.listdir(METADATA_DIR)):
+        if not name.endswith(".json"):
             continue
-
-        asset_id = metadata_file.replace(".json", "")
-
+        asset_id = name[:-5]
         try:
-            with open(os.path.join(metadata_dir, metadata_file), "r") as f:
-                metadata = json.load(f)
-
-            file_path = metadata.get("file_path", "")
-            if file_path:
-                filename = os.path.basename(file_path)
-                mapping["asset_to_file"][asset_id] = filename
-                mapping["file_to_asset"][filename] = asset_id
-        except Exception as e:
-            logging.error(f"Error reading metadata for {asset_id}: {e}")
-
-    return mapping
+            with open(os.path.join(METADATA_DIR, name)) as f:
+                source = json.load(f)
+            images.append(_describe(asset_id, source, all_crops.get(asset_id, {})))
+        except (OSError, ValueError, AttributeError) as e:
+            # A missing source file is skipped; the next sync repairs it.
+            logging.debug("Skipping cached image %s: %s", asset_id, e)
+    return images

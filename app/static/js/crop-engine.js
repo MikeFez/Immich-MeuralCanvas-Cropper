@@ -7,336 +7,79 @@
  * 1. Always maintain the exact aspect ratio of the target orientation (portrait/landscape)
  * 2. Automatically adjust when viewport changes size (responsive design)
  * 3. Allow user to modify scale and position while maintaining aspect ratio
- * 4. Only reset position when switching images or when viewport size changes
+ * 4. Preserve the selection when viewport size changes
  * 5. Preserve user modifications otherwise
  */
 
-/**
- * Position an element to match exact position of an image
- * @param {HTMLElement} element - Element to position
- * @param {HTMLElement} image - Image to match position
- * @param {HTMLElement} container - Container element
- * @returns {Object|null} Position data or null
- */
-function positionElementToImage(element, image, container) {
-    if (!element || !image || !container) return null;
-
-    // Get the exact position of the image
-    const imgRect = image.getBoundingClientRect();
-    const containerRect = container.getBoundingClientRect();
-
-    // Calculate the relative position - this is crucial for proper positioning
-    const left = imgRect.left - containerRect.left;
-    const top = imgRect.top - containerRect.top;
-
-    console.log('Image position:', { left, top, width: imgRect.width, height: imgRect.height });
-
-    // Set position and size to match the image exactly
-    element.style.position = 'absolute';
-    element.style.left = left + 'px';
-    element.style.top = top + 'px';
-    element.style.width = imgRect.width + 'px';
-    element.style.height = imgRect.height + 'px';
-
-    // Store the image dimensions in the container's dataset
-    container.dataset.imgLeft = left;
-    container.dataset.imgTop = top;
-    container.dataset.imgWidth = imgRect.width;
-    container.dataset.imgHeight = imgRect.height;
-
-    return { left, top, width: imgRect.width, height: imgRect.height };
-}
-
-/**
- * Ensure image fits in viewport and crop box stays on image
- * Added enhanced timing to work properly with the first image
- */
+/** Fit the loaded image and restore the crop from original-image coordinates. */
 function forceImageFit() {
-    if (!window.ELEMENTS.currentImageEl || !window.ELEMENTS.editorContainerEl) return;
-
-    console.log("Forcing image fit");
-
-    // Prevent duplicate calls in quick succession
-    if (window._forceImageFitInProgress) {
-        console.log("Image fit already in progress, skipping duplicate call");
-        return;
-    }
-    window._forceImageFitInProgress = true;
-
-    // Only set viewport resizing flag if we're not currently loading a new image
-    // This prevents saved crop data from being ignored when loading images with existing crops
-    if (!window._loadingNewImage) {
-        window._viewportResizing = true;
-    }
-
-    // Get container dimensions
-    const containerWidth = window.ELEMENTS.editorContainerEl.clientWidth;
-    const containerHeight = window.ELEMENTS.editorContainerEl.clientHeight;
-
-    console.log("Container dimensions:", containerWidth, containerHeight);
-
-    // Reset image sizing to default natural size first
-    window.ELEMENTS.currentImageEl.style.maxHeight = 'none';
-    window.ELEMENTS.currentImageEl.style.maxWidth = 'none';
-    window.ELEMENTS.currentImageEl.style.width = 'auto';
-    window.ELEMENTS.currentImageEl.style.height = 'auto';
-
-    // Ensure the image is loaded before continuing
-    if (!window.ELEMENTS.currentImageEl.complete ||
-        !window.ELEMENTS.currentImageEl.naturalWidth) {
-        console.log("Image not fully loaded, waiting...");
-        window.ELEMENTS.currentImageEl.onload = () => {
-            // Retry after image loads
-            setTimeout(forceImageFit, 10);
-        };
-        return;
-    }
-
-    // Get natural image dimensions
-    const imgNaturalWidth = window.ELEMENTS.currentImageEl.naturalWidth;
-    const imgNaturalHeight = window.ELEMENTS.currentImageEl.naturalHeight;
-
-    console.log("Natural image dimensions:", imgNaturalWidth, imgNaturalHeight);
-
-    // Calculate the scaling factor to fit the image within the container
-    // with a small margin for aesthetics
-    const margin = 40; // 20px on each side
-    const scaleX = (containerWidth - margin) / imgNaturalWidth;
-    const scaleY = (containerHeight - margin) / imgNaturalHeight;
-
-    // Use the smaller scale to ensure image fits both dimensions
-    const scale = Math.min(scaleX, scaleY);
-
-    // Set explicit width and height (more reliable than max-width/max-height)
-    const targetWidth = Math.floor(imgNaturalWidth * scale);
-    const targetHeight = Math.floor(imgNaturalHeight * scale);
-
-    console.log("Calculated dimensions:", targetWidth, targetHeight, "scale:", scale);
-
-    // Apply calculated dimensions directly
-    window.ELEMENTS.currentImageEl.style.width = targetWidth + 'px';
-    window.ELEMENTS.currentImageEl.style.height = targetHeight + 'px';
-
-    // Make sure container is set up correctly
-    window.ELEMENTS.editorContainerEl.style.display = 'flex';
-    window.ELEMENTS.editorContainerEl.style.justifyContent = 'center';
-    window.ELEMENTS.editorContainerEl.style.alignItems = 'center';
-    window.ELEMENTS.editorContainerEl.style.position = 'relative';
-
-    // Force immediate application by triggering layout
-    window.ELEMENTS.currentImageEl.offsetHeight; // Force reflow
-
-    // Use requestAnimationFrame to ensure DOM updates are complete
-    requestAnimationFrame(() => {
-        // For the first image, wait a bit longer to ensure everything is loaded
-        const delay = window.APP_STATE.firstImageLoad ? 200 : 100;
-        window.APP_STATE.firstImageLoad = false;
-
-        setTimeout(() => {
-            // Position the overlay to exactly match the image
-            if (window.ELEMENTS.cropOverlayEl) {
-                // Get the exact position of the image
-                const imgRect = window.ELEMENTS.currentImageEl.getBoundingClientRect();
-                const containerRect = window.ELEMENTS.editorContainerEl.getBoundingClientRect();
-
-                // Calculate the relative position
-                const left = imgRect.left - containerRect.left;
-                const top = imgRect.top - containerRect.top;
-
-                console.log('Image position after fit:', { left, top, width: imgRect.width, height: imgRect.height });
-
-                // Set overlay position and size to cover the entire editor container
-                window.ELEMENTS.cropOverlayEl.style.position = 'absolute';
-                window.ELEMENTS.cropOverlayEl.style.left = '0';
-                window.ELEMENTS.cropOverlayEl.style.top = '0';
-                window.ELEMENTS.cropOverlayEl.style.width = '100%';
-                window.ELEMENTS.cropOverlayEl.style.height = '100%';
-                window.ELEMENTS.cropOverlayEl.style.display = 'block';
-                window.ELEMENTS.cropOverlayEl.style.backgroundColor = 'rgba(0, 0, 0, 0.6)';
-
-                // Store the image dimensions in the container's dataset
-                window.ELEMENTS.editorContainerEl.dataset.imgLeft = left;
-                window.ELEMENTS.editorContainerEl.dataset.imgTop = top;
-                window.ELEMENTS.editorContainerEl.dataset.imgWidth = imgRect.width;
-                window.ELEMENTS.editorContainerEl.dataset.imgHeight = imgRect.height;
-
-                // Reinitialize the crop rectangle if needed, but only if we're not already inside
-                // the initCropRectangle function (to prevent recursion and shrinkage)
-                // Also skip if we just loaded a new image with saved crop data (to prevent double-scaling)
-                // or if we've already initialized the crop rectangle for this image
-                if (window.ELEMENTS.cropRectangleEl && !window._initializingCropRectangle &&
-                    !window._loadingNewImage && !window._cropRectangleInitialized) {
-                    const { currentStage } = window.APP_STATE;
-                    // Only initialize crop rectangle if we're in stage 1 or 2 (not in review stage)
-                    if (currentStage === 1) {
-                        // Make sure elements are visible in portrait stage
-                        window.ELEMENTS.cropOverlayEl.style.display = 'block';
-                        window.ELEMENTS.cropRectangleEl.style.display = 'block';
-                        window.ELEMENTS.previewViewEl.style.display = 'none';
-                        initCropRectangle(getAspectRatio('portrait')); // Portrait ratio
-                    } else if (currentStage === 2) {
-                        // Make sure elements are visible in landscape stage
-                        window.ELEMENTS.cropOverlayEl.style.display = 'block';
-                        window.ELEMENTS.cropRectangleEl.style.display = 'block';
-                        window.ELEMENTS.previewViewEl.style.display = 'none';
-                        initCropRectangle(getAspectRatio('landscape')); // Landscape ratio
-                    } else if (currentStage === 3) {
-                        // In review stage - hide crop elements and show preview
-                        window.ELEMENTS.cropOverlayEl.style.display = 'none';
-                        window.ELEMENTS.cropRectangleEl.style.display = 'none';
-                        window.ELEMENTS.previewViewEl.style.display = 'block';
-                    }
-                }
-            }
-            // Reset progress and viewport resizing flags
-            window._forceImageFitInProgress = false;
-            window._viewportResizing = false;
-        }, delay);
+    const { currentImageEl: image, editorContainerEl: container } = window.ELEMENTS;
+    if (!image?.complete || !image.naturalWidth || !container || !window.APP_STATE.currentImage) return;
+    const width = container.clientWidth - 40;
+    const height = container.clientHeight - 40;
+    if (width <= 0 || height <= 0) return;
+    const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
+    image.style.width = image.naturalWidth * scale + 'px';
+    image.style.height = image.naturalHeight * scale + 'px';
+    const bounds = image.getBoundingClientRect();
+    const parent = container.getBoundingClientRect();
+    Object.assign(container.dataset, {
+        imgLeft: bounds.left - parent.left, imgTop: bounds.top - parent.top,
+        imgWidth: bounds.width, imgHeight: bounds.height
     });
+    const stage = window.APP_STATE.currentStage;
+    if (stage === 1 || stage === 2) initCropRectangle(getAspectRatio(stage === 1 ? 'portrait' : 'landscape'));
 }
 
-/**
- * Initialize crop rectangle for current image
- * @param {number} aspectRatio - Desired aspect ratio for crop
- */
+/** Restore a saved/draft selection, or center the largest crop with the target ratio. */
 function initCropRectangle(aspectRatio) {
-    // Prevent recursive calls
-    if (window._initializingCropRectangle) {
-        console.log("Already initializing crop rectangle, skipping duplicate call");
-        return;
+    const { currentImageEl: image, editorContainerEl: container, cropRectangleEl: rectangle } = window.ELEMENTS;
+    if (!image?.complete || !image.naturalWidth || !rectangle) return;
+    const bounds = image.getBoundingClientRect();
+    const parent = container.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    const left = bounds.left - parent.left, top = bounds.top - parent.top;
+    Object.assign(container.dataset, { imgLeft: left, imgTop: top, imgWidth: bounds.width, imgHeight: bounds.height });
+    const stage = window.APP_STATE.currentStage;
+    if (stage !== 1 && stage !== 2) return;
+    const saved = window.APP_STATE[stage === 1 ? 'portraitCrop' : 'landscapeCrop'];
+    let width = Math.min(bounds.width, bounds.height * aspectRatio);
+    let height = width / aspectRatio;
+    let x = (bounds.width - width) / 2, y = (bounds.height - height) / 2;
+    if (saved?.width > 0 && saved?.height > 0) {
+        const scaleX = bounds.width / image.naturalWidth, scaleY = bounds.height / image.naturalHeight;
+        width = Math.min(bounds.width, saved.width * scaleX);
+        height = Math.min(bounds.height, saved.height * scaleY);
+        x = Math.max(0, Math.min(saved.x * scaleX, bounds.width - width));
+        y = Math.max(0, Math.min(saved.y * scaleY, bounds.height - height));
     }
+    Object.assign(rectangle.style, {
+        position: 'absolute', left: left + x + 'px', top: top + y + 'px',
+        width: width + 'px', height: height + 'px', display: 'block'
+    });
+    window.ELEMENTS.cropOverlayEl.style.display = 'block';
+    updateCropValues();
+    updateOverlayPosition();
+    setupCropHandlers();
+    window._cropRectangleInitialized = true;
+}
 
-    // Set flag to prevent recursive calls
-    window._initializingCropRectangle = true;
-
-    // Ensure the image is fully loaded before getting measurements
-    if (!window.ELEMENTS.currentImageEl.complete ||
-        !window.ELEMENTS.currentImageEl.naturalWidth) {
-        console.log("Image not fully loaded, delaying initialization");
-        setTimeout(() => {
-            window._initializingCropRectangle = false;
-            initCropRectangle(aspectRatio);
-        }, 100);
-        return;
-    }
-
-    // Get direct measurements of the image
-    const imgRect = window.ELEMENTS.currentImageEl.getBoundingClientRect();
-    const containerRect = window.ELEMENTS.editorContainerEl.getBoundingClientRect();
-
-    // Calculate exact position of image relative to container
-    const imgLeft = imgRect.left - containerRect.left;
-    const imgTop = imgRect.top - containerRect.top;
-    const imgWidth = imgRect.width;
-    const imgHeight = imgRect.height;
-
-    console.log("Image position:", imgLeft, imgTop, imgWidth, imgHeight);
-
-    // Calculate crop size based on aspect ratio
-    let cropWidth, cropHeight, cropX, cropY;
-
-    // Get current stage and check for saved crop data
-    const { currentStage } = window.APP_STATE;
-    const savedCrop = currentStage === 1
-        ? window.APP_STATE.portraitCrop
-        : window.APP_STATE.landscapeCrop;
-
-    // Check if we have valid saved crop data AND this is not a viewport resize
-    // Only reuse saved crop data if we're not in a resizing operation
-    if (savedCrop && savedCrop.width > 0 && savedCrop.height > 0 && !window._viewportResizing) {
-        // Get current image's natural dimensions vs display dimensions
-        const scaleX = imgWidth / window.ELEMENTS.currentImageEl.naturalWidth;
-        const scaleY = imgHeight / window.ELEMENTS.currentImageEl.naturalHeight;
-
-        // Calculate the absolute values based on the original saved crop (relative to original image)
-        cropWidth = Math.round(savedCrop.width * scaleX);
-        cropHeight = Math.round(savedCrop.height * scaleY);
-        cropX = Math.round(imgLeft + (savedCrop.x * scaleX));
-        cropY = Math.round(imgTop + (savedCrop.y * scaleY));
-
-        // Ensure crop dimensions don't exceed current image bounds
-        cropWidth = Math.min(cropWidth, imgWidth);
-        cropHeight = Math.min(cropHeight, imgHeight);
-
-        // Ensure crop doesn't extend beyond image edges
-        if (cropX + cropWidth > imgLeft + imgWidth) {
-            cropX = imgLeft + imgWidth - cropWidth;
-        }
-        if (cropY + cropHeight > imgTop + imgHeight) {
-            cropY = imgTop + imgHeight - cropHeight;
-        }
-
-        console.log("Using scaled saved crop data:", {
-            original: savedCrop,
-            scaled: {x: cropX - imgLeft, y: cropY - imgTop, width: cropWidth, height: cropHeight},
-            scaleFactors: {x: scaleX, y: scaleY}
-        });
+/** Observe editor geometry once; coalesce layout work into one animation frame. */
+function setupEditorResize() {
+    const container = window.ELEMENTS.editorContainerEl;
+    if (!container || container._resizeInstalled) return;
+    container._resizeInstalled = true;
+    let frame = null;
+    const schedule = () => {
+        if (frame !== null) return;
+        frame = requestAnimationFrame(() => { frame = null; forceImageFit(); });
+    };
+    if (window.ResizeObserver) {
+        container._resizeObserver = new ResizeObserver(schedule);
+        container._resizeObserver.observe(container);
     } else {
-        // Always use the full-frame crop with proper aspect ratio
-        // This ensures the crop matches the orientation dimensions
-
-        // Calculate crop dimensions based on aspect ratio
-        if (imgWidth / imgHeight > aspectRatio) {
-            // Image is wider than crop ratio - use max height
-            cropHeight = imgHeight;
-            cropWidth = cropHeight * aspectRatio;
-        } else {
-            // Image is taller than crop ratio - use max width
-            cropWidth = imgWidth;
-            cropHeight = cropWidth / aspectRatio;
-        }
-
-        // Ensure crop isn't bigger than image (safety check)
-        cropWidth = Math.min(cropWidth, imgWidth);
-        cropHeight = Math.min(cropHeight, imgHeight);
-
-        // Center the crop rectangle on the image
-        cropX = imgLeft + (imgWidth - cropWidth) / 2;
-        cropY = imgTop + (imgHeight - cropHeight) / 2;
+        window.addEventListener('resize', schedule);
     }
-
-    console.log("Crop rectangle:", cropX, cropY, cropWidth, cropHeight);
-
-    // Position the crop rectangle
-    window.ELEMENTS.cropRectangleEl.style.position = 'absolute';
-    window.ELEMENTS.cropRectangleEl.style.left = cropX + 'px';
-    window.ELEMENTS.cropRectangleEl.style.top = cropY + 'px';
-    window.ELEMENTS.cropRectangleEl.style.width = cropWidth + 'px';
-    window.ELEMENTS.cropRectangleEl.style.height = cropHeight + 'px';
-    window.ELEMENTS.cropRectangleEl.style.display = 'block';
-
-    // Store crop values relative to the image
-    if (currentStage === 1) {
-        window.APP_STATE.portraitCrop = {
-            x: cropX - imgLeft,
-            y: cropY - imgTop,
-            width: cropWidth,
-            height: cropHeight
-        };
-    } else if (currentStage === 2) {
-        window.APP_STATE.landscapeCrop = {
-            x: cropX - imgLeft,
-            y: cropY - imgTop,
-            width: cropWidth,
-            height: cropHeight
-        };
-    }
-
-    // Delay the update of overlay position to ensure elements are ready
-    setTimeout(() => {
-        updateOverlayPosition();
-        // Setup crop handlers
-        setupCropHandlers();
-
-        // Reset initialization flag
-        window._initializingCropRectangle = false;
-
-        // Reset loading new image flag after crop rectangle is properly initialized
-        window._loadingNewImage = false;
-
-        // Mark that crop rectangle has been successfully initialized for this image
-        window._cropRectangleInitialized = true;
-    }, 50);
 }
 
 /**
@@ -349,39 +92,8 @@ function updateOverlayPosition() {
         return;
     }
 
-    // Use getBoundingClientRect for precise measurements relative to viewport
     const containerRect = window.ELEMENTS.editorContainerEl.getBoundingClientRect();
     const cropRect = window.ELEMENTS.cropRectangleEl.getBoundingClientRect();
-    const overlayRect = window.ELEMENTS.cropOverlayEl.getBoundingClientRect();
-    const imageRect = window.ELEMENTS.currentImageEl.getBoundingClientRect();
-
-    // Log detailed positions for debugging
-    console.log("Overlay positioning measurements:", {
-        container: {
-            left: containerRect.left,
-            top: containerRect.top,
-            width: containerRect.width,
-            height: containerRect.height
-        },
-        cropRect: {
-            left: cropRect.left,
-            top: cropRect.top,
-            width: cropRect.width,
-            height: cropRect.height
-        },
-        overlay: {
-            left: overlayRect.left,
-            top: overlayRect.top,
-            width: overlayRect.width,
-            height: overlayRect.height
-        },
-        image: {
-            left: imageRect.left,
-            top: imageRect.top,
-            width: imageRect.width,
-            height: imageRect.height
-        }
-    });
 
     // First ensure the overlay covers the entire container
     window.ELEMENTS.cropOverlayEl.style.position = 'absolute';
@@ -409,16 +121,15 @@ function updateOverlayPosition() {
     window.ELEMENTS.cropOverlayEl.style.display = 'none';
     window.ELEMENTS.cropOverlayEl.offsetHeight; // Force reflow
     window.ELEMENTS.cropOverlayEl.style.display = 'block';
-
-    console.log('Overlay update:', {
-        crop: { left: cropLeft, top: cropTop, right: cropRight, bottom: cropBottom }
-    });
 }
 
 /**
  * Setup drag and resize handlers for crop rectangle
  */
 function setupCropHandlers() {
+    const rectangle = window.ELEMENTS.cropRectangleEl;
+    if (rectangle._handlersAttached) return;
+    rectangle._handlersAttached = true;
     const handles = window.ELEMENTS.cropRectangleEl.querySelectorAll('.crop-handle');
     let isDragging = false;
     let isResizing = false;
@@ -665,231 +376,49 @@ function setupCropHandlers() {
  * Update crop values based on current position
  */
 function updateCropValues() {
-    // Get image position from dataset (stored by forceImageFit)
-    const imgLeft = parseFloat(window.ELEMENTS.editorContainerEl.dataset.imgLeft) || 0;
-    const imgTop = parseFloat(window.ELEMENTS.editorContainerEl.dataset.imgTop) || 0;
-
-    // Get crop rectangle position and size directly from DOM
-    // We use parseInt to ensure we're working with whole numbers
-    const cropX = parseInt(window.ELEMENTS.cropRectangleEl.style.left) || 0;
-    const cropY = parseInt(window.ELEMENTS.cropRectangleEl.style.top) || 0;
-    const cropWidth = parseInt(window.ELEMENTS.cropRectangleEl.style.width) || 0;
-    const cropHeight = parseInt(window.ELEMENTS.cropRectangleEl.style.height) || 0;
-
-    // Get the current orientation and aspect ratio
-    const { currentStage } = window.APP_STATE;
-    const orientation = currentStage === 1 ? 'portrait' : 'landscape';
-    const aspectRatio = getAspectRatio(orientation);
-
-    // Verify crop has correct aspect ratio
-    const currentRatio = cropWidth / cropHeight;
-    let finalWidth = cropWidth;
-    let finalHeight = cropHeight;
-
-    // If aspect ratio doesn't match, adjust height to maintain the width
-    if (Math.abs(currentRatio - aspectRatio) > 0.01) {
-        console.log("Fixing crop aspect ratio:", currentRatio, "should be", aspectRatio);
-        finalHeight = finalWidth / aspectRatio;
-    }
-
-    console.log("Updating crop values:", {
-        image: { left: imgLeft, top: imgTop },
-        crop: { x: cropX, y: cropY, width: finalWidth, height: finalHeight },
-        relativeCrop: { x: cropX - imgLeft, y: cropY - imgTop }
-    });
-
-    // Store values relative to the image
-    if (currentStage === 1) {
-        window.APP_STATE.portraitCrop = {
-            x: cropX - imgLeft,
-            y: cropY - imgTop,
-            width: finalWidth,
-            height: finalHeight
-        };
-    } else if (currentStage === 2) {
-        window.APP_STATE.landscapeCrop = {
-            x: cropX - imgLeft,
-            y: cropY - imgTop,
-            width: finalWidth,
-            height: finalHeight
-        };
-    }
+    const img = window.ELEMENTS.currentImageEl;
+    const rectangle = window.ELEMENTS.cropRectangleEl;
+    const container = window.ELEMENTS.editorContainerEl;
+    if (!img?.naturalWidth || !rectangle || !container) return;
+    const bounds = img.getBoundingClientRect();
+    const parent = container.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    const scaleX = img.naturalWidth / bounds.width;
+    const scaleY = img.naturalHeight / bounds.height;
+    const x = Math.max(0, Math.min(img.naturalWidth - 1,
+        ((parseFloat(rectangle.style.left) || 0) - (bounds.left - parent.left)) * scaleX));
+    const y = Math.max(0, Math.min(img.naturalHeight - 1,
+        ((parseFloat(rectangle.style.top) || 0) - (bounds.top - parent.top)) * scaleY));
+    const crop = {
+        x, y,
+        width: Math.min((parseFloat(rectangle.style.width) || 0) * scaleX, img.naturalWidth - x),
+        height: Math.min((parseFloat(rectangle.style.height) || 0) * scaleY, img.naturalHeight - y)
+    };
+    const stage = window.APP_STATE.currentStage;
+    if (stage === 1) window.APP_STATE.portraitCrop = crop;
+    else if (stage === 2) window.APP_STATE.landscapeCrop = crop;
 }
 
 /**
  * Perform crop operation on the server
  * @param {string} orientation - Either 'portrait' or 'landscape'
  */
-function performCrop(orientation) {
-    if (!window.APP_STATE.currentImage) return;
-
-    // Get the crop data for the current orientation
-    let crop = orientation === 'portrait' ? window.APP_STATE.portraitCrop : window.APP_STATE.landscapeCrop;
+async function performCrop(orientation) {
     const currentImage = window.APP_STATE.currentImage;
-
-    // Double check that the crop has the correct aspect ratio
-    const aspectRatio = getAspectRatio(orientation);
-    const currentRatio = crop.width / crop.height;
-
-    // Verify if aspect ratio is not matching the expected ratio
-    // Add small tolerance for floating point errors
-    if (Math.abs(currentRatio - aspectRatio) > 0.01) {
-        console.log("Fixing crop aspect ratio:", currentRatio, "should be", aspectRatio);
-        // Adjust height to match the correct aspect ratio
-        crop.height = crop.width / aspectRatio;
+    if (!currentImage) throw new Error('No image selected');
+    updateCropValues();
+    const crop = window.APP_STATE[orientation + 'Crop'];
+    if (!crop || crop.width < 1 || crop.height < 1) throw new Error('Crop is not ready');
+    const preview = orientation === 'portrait'
+        ? window.ELEMENTS.portraitPreviewImgEl : window.ELEMENTS.landscapePreviewImgEl;
+    if (preview) preview.style.opacity = '0.5';
+    try {
+        const data = await postJSON('/crop', { identifier: currentImage.asset_id, orientation, crop });
+        if (preview && window.APP_STATE.currentImage?.asset_id === currentImage.asset_id) {
+            preview.src = previewURL(currentImage.asset_id, orientation, crop);
+        }
+        return data;
+    } finally {
+        if (preview) preview.style.opacity = '1';
     }
-
-    // Get the identifier - prefer asset_id if available
-    const identifier = currentImage.asset_id || currentImage.filename;
-
-    // Calculate true coordinates relative to original image
-    const imgEl = window.ELEMENTS.currentImageEl;
-    const naturalWidth = imgEl.naturalWidth;
-    const naturalHeight = imgEl.naturalHeight;
-    const displayWidth = parseFloat(window.ELEMENTS.editorContainerEl.dataset.imgWidth) || imgEl.offsetWidth;
-    const displayHeight = parseFloat(window.ELEMENTS.editorContainerEl.dataset.imgHeight) || imgEl.offsetHeight;
-
-    // Scale factors
-    const scaleX = naturalWidth / displayWidth;
-    const scaleY = naturalHeight / displayHeight;
-
-    // Calculate scaled crop coordinates directly without mirroring
-    const scaledCrop = {
-        x: Math.floor(crop.x * scaleX),
-        y: Math.floor(crop.y * scaleY),
-        width: Math.floor(crop.width * scaleX),
-        height: Math.floor(crop.height * scaleY)
-    };
-
-    // Ensure crop dimensions don't exceed image dimensions
-    scaledCrop.width = Math.min(scaledCrop.width, naturalWidth - scaledCrop.x);
-    scaledCrop.height = Math.min(scaledCrop.height, naturalHeight - scaledCrop.y);
-
-    // Log crop data for debugging
-    console.log('Original crop:', crop);
-    console.log('Natural dimensions:', naturalWidth, naturalHeight);
-    console.log('Display dimensions:', displayWidth, displayHeight);
-    console.log('Scale factors:', scaleX, scaleY);
-    console.log('Scaled crop:', scaledCrop);
-
-    // Show loading indicator in the appropriate frame
-    const previewImg = orientation === 'portrait' ?
-        window.ELEMENTS.portraitPreviewImgEl :
-        window.ELEMENTS.landscapePreviewImgEl;
-
-    if (previewImg) {
-        // Create or update loading indicator
-        let loadingIndicator = previewImg.parentElement.querySelector('.loading-indicator');
-        if (!loadingIndicator) {
-            loadingIndicator = document.createElement('div');
-            loadingIndicator.className = 'loading-indicator';
-            loadingIndicator.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-            previewImg.parentElement.appendChild(loadingIndicator);
-        }
-        loadingIndicator.style.display = 'flex';
-        previewImg.style.opacity = '0.5';
-    }
-
-    // Send crop request
-    fetch('/crop', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            identifier: identifier,
-            orientation: orientation,
-            crop: scaledCrop
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            // Update preview - we need to fetch the output images directly
-            const timestamp = new Date().getTime(); // Cache-busting
-
-            if (orientation === 'portrait') {
-                // Set a direct link to the output file using the identifier
-                const portraitOutputPath = currentImage.asset_id ?
-                    `/output/portrait/${encodeURIComponent(currentImage.asset_id)}_portrait.jpg?t=${timestamp}` :
-                    `/output/portrait/${encodeURIComponent(currentImage.filename.replace('.', '_portrait.'))}?t=${timestamp}`;
-
-                // Preload the image before showing it
-                const tempImg = new Image();
-                tempImg.onload = function() {
-                    window.ELEMENTS.portraitPreviewImgEl.src = portraitOutputPath;
-                    window.ELEMENTS.portraitPreviewImgEl.style.opacity = '1';
-                    const loadingIndicator = window.ELEMENTS.portraitPreviewImgEl.parentElement.querySelector('.loading-indicator');
-                    if (loadingIndicator) {
-                        loadingIndicator.style.display = 'none';
-                    }
-                };
-                tempImg.src = portraitOutputPath;
-            } else {
-                // Set a direct link to the output file using the identifier
-                const landscapeOutputPath = currentImage.asset_id ?
-                    `/output/landscape/${encodeURIComponent(currentImage.asset_id)}_landscape.jpg?t=${timestamp}` :
-                    `/output/landscape/${encodeURIComponent(currentImage.filename.replace('.', '_landscape.'))}?t=${timestamp}`;
-
-                // Preload the image before showing it
-                const tempImg = new Image();
-                tempImg.onload = function() {
-                    window.ELEMENTS.landscapePreviewImgEl.src = landscapeOutputPath;
-                    window.ELEMENTS.landscapePreviewImgEl.style.opacity = '1';
-                    const loadingIndicator = window.ELEMENTS.landscapePreviewImgEl.parentElement.querySelector('.loading-indicator');
-                    if (loadingIndicator) {
-                        loadingIndicator.style.display = 'none';
-                    }
-                };
-                tempImg.src = landscapeOutputPath;
-            }
-
-            // Update image status
-            if (orientation === 'portrait') {
-                if (window.APP_STATE.currentImage.status === 'landscape') {
-                    window.APP_STATE.currentImage.status = 'both';
-                } else {
-                    window.APP_STATE.currentImage.status = 'portrait';
-                }
-            } else {
-                if (window.APP_STATE.currentImage.status === 'portrait') {
-                    window.APP_STATE.currentImage.status = 'both';
-                } else {
-                    window.APP_STATE.currentImage.status = 'landscape';
-                }
-            }
-        } else {
-            // Remove loading indicator on error
-            const previewImg = orientation === 'portrait' ?
-                window.ELEMENTS.portraitPreviewImgEl :
-                window.ELEMENTS.landscapePreviewImgEl;
-
-            if (previewImg) {
-                previewImg.style.opacity = '1';
-                const loadingIndicator = previewImg.parentElement.querySelector('.loading-indicator');
-                if (loadingIndicator) {
-                    loadingIndicator.style.display = 'none';
-                }
-            }
-
-            alert('Error cropping image: ' + (data.error || 'Unknown error'));
-        }
-    })
-    .catch(error => {
-        console.error('Error cropping image:', error);
-        alert('Error cropping image: ' + error);
-
-        // Remove loading indicator on error
-        const previewImg = orientation === 'portrait' ?
-            window.ELEMENTS.portraitPreviewImgEl :
-            window.ELEMENTS.landscapePreviewImgEl;
-
-        if (previewImg) {
-            previewImg.style.opacity = '1';
-            const loadingIndicator = previewImg.parentElement.querySelector('.loading-indicator');
-            if (loadingIndicator) {
-                loadingIndicator.style.display = 'none';
-            }
-        }
-    });
 }

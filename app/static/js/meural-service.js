@@ -153,8 +153,7 @@ function previewCurrentOnMeural() {
         return;
     }
 
-    // Get the identifier (prefer asset_id if available)
-    const identifier = currentImage.asset_id || currentImage.filename;
+    const identifier = currentImage.asset_id;
 
     // Determine which orientation to preview based on current stage
     const usePortrait = currentStage === 1 || (currentStage === 3 && window.APP_STATE.portraitCrop.width > 0);
@@ -170,80 +169,8 @@ function previewCurrentOnMeural() {
     // For current editing stage, we need to create a temporary crop
     const useTempCrop = currentStage < 3;
 
-    // IMPORTANT: Make sure we're getting the currently selected crop data
-    // based on what's shown in the crop rectangle
-    let cropData;
-
-    if (currentStage < 3 && window.ELEMENTS.cropRectangleEl) {
-        // Get current crop position and dimensions directly from the DOM element
-        const cropRect = window.ELEMENTS.cropRectangleEl;
-        const imgRect = window.ELEMENTS.currentImageEl;
-
-        // Get container bounds
-        const containerRect = window.ELEMENTS.editorContainerEl.getBoundingClientRect();
-        const imgBounds = imgRect.getBoundingClientRect();
-
-        // Calculate the image position relative to the container
-        const imgLeft = imgBounds.left - containerRect.left;
-        const imgTop = imgBounds.top - containerRect.top;
-
-        // Get crop rectangle position and size
-        const cropLeft = parseInt(cropRect.style.left) || 0;
-        const cropTop = parseInt(cropRect.style.top) || 0;
-        const cropWidth = parseInt(cropRect.style.width) || 0;
-        const cropHeight = parseInt(cropRect.style.height) || 0;
-
-        // Calculate crop position relative to the image
-        const x = cropLeft - imgLeft;
-        const y = cropTop - imgTop;
-
-        // Calculate scale factors to convert from display size to original image size
-        const scaleX = imgRect.naturalWidth / imgRect.offsetWidth;
-        const scaleY = imgRect.naturalHeight / imgRect.offsetHeight;
-
-        // Scale the crop coordinates to match the original image dimensions
-        cropData = {
-            x: Math.floor(x * scaleX),
-            y: Math.floor(y * scaleY),
-            width: Math.floor(cropWidth * scaleX),
-            height: Math.floor(cropHeight * scaleY)
-        };
-
-        console.log('Current crop rectangle coordinates:', {
-            cropRect: { left: cropLeft, top: cropTop, width: cropWidth, height: cropHeight },
-            imgBounds: { left: imgLeft, top: imgTop, width: imgBounds.width, height: imgBounds.height },
-            scaledCrop: cropData
-        });
-    } else {
-        // Use stored crop data
-        cropData = usePortrait ? window.APP_STATE.portraitCrop : window.APP_STATE.landscapeCrop;
-
-        // If we have stored crop data for the current stage, we need to scale it
-        // from display coordinates to original image coordinates
-        if (cropData && cropData.width > 0) {
-            const imgRect = window.ELEMENTS.currentImageEl;
-
-            // Calculate scale factors
-            const scaleX = imgRect.naturalWidth / imgRect.offsetWidth;
-            const scaleY = imgRect.naturalHeight / imgRect.offsetHeight;
-
-            // Scale the crop coordinates
-            cropData = {
-                x: Math.floor(cropData.x * scaleX),
-                y: Math.floor(cropData.y * scaleY),
-                width: Math.floor(cropData.width * scaleX),
-                height: Math.floor(cropData.height * scaleY)
-            };
-        }
-    }
-
-    // Add explicit logging to show what we're sending
-    console.log('Sending to Meural API:', {
-        identifier: identifier,
-        orientation: orientation,
-        useTempCrop: useTempCrop,
-        cropData: cropData
-    });
+    if (useTempCrop) updateCropValues();
+    const cropData = window.APP_STATE[orientation + 'Crop'];
 
     // Show device selection dialog
     showMeuralDeviceDialog(deviceIp => {
@@ -257,7 +184,7 @@ function previewCurrentOnMeural() {
         previewOnMeural(deviceIp, identifier, orientation, useTempCrop, cropData)
             .then(result => {
                 if (!result.success) {
-                    alert(`Error: ${result.message}`);
+                    alert(`Error: ${result.message || result.error}`);
                 }
             })
             .catch(error => {
