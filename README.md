@@ -58,13 +58,13 @@ A comprehensive web application designed to seamlessly crop images from Immich f
    cd Immich-MeuralCanvas-Cropper
    ```
 
-2. **Create configuration**:
+2. **Create the config directory** (the app saves its settings there):
    ```bash
    mkdir -p config
-   cp config-example.yaml config/config.yaml
    ```
 
-3. **Edit configuration** (see [Configuration](#configuration) section)
+3. **Configure in the browser**: once the app is running (next step), it opens
+   **Settings** on first start. See [Configuration](#configuration).
 
 4. **Build and run**:
 
@@ -164,10 +164,8 @@ Here's a complete example from clone to running:
 git clone https://github.com/your-repo/Immich-MeuralCanvas-Cropper.git
 cd Immich-MeuralCanvas-Cropper
 
-# Create and edit configuration
+# Create the config directory; Settings opens on first start to fill it in
 mkdir -p config
-cp config-example.yaml config/config.yaml
-# Edit config/config.yaml with your Immich details
 
 # Start the application (choose one method)
 
@@ -217,12 +215,11 @@ The application will be available at `http://localhost:5001`
    pip install -r requirements.txt
    ```
 
-3. **Configure application**:
+3. **Create the config directory**:
    ```bash
    mkdir -p config
-   cp config-example.yaml config/config.yaml
-   # Edit config/config.yaml with your settings
    ```
+   Settings opens on first start (see [Configuration](#configuration)).
 
 4. **Run application**:
    ```bash
@@ -255,7 +252,30 @@ background jobs live in memory, so don't run multiple workers).
 
 ## ⚙️ Configuration
 
-Create `config/config.yaml` based on the example:
+Open **Settings** (top right). On first start it opens by itself.
+
+1. Enter the Immich server URL and an API key (see [below](#getting-immich-api-key)
+   for the permissions it needs).
+2. Click **Connect & load albums**, then choose the **input album** (photos to
+   crop) and the **output album** (where crops go). Albums shared with you are
+   listed too; the two must be different.
+3. Add your Meural Canvas devices (optional) and set the crop sizes to your
+   Canvas's resolution.
+4. **Save**. Settings take effect immediately, without a restart, and choosing
+   a different input album starts a sync.
+
+Settings are saved to `config/config.yaml` (`/config/config.yaml` in Docker),
+readable only by the app's user. The API key is never sent back to the browser:
+its field shows "Saved", and leaving it blank keeps it. **Changing the server
+URL requires entering the key again**, so the saved key can't be sent to a
+different server. The app has no login, so anyone who can reach it can change
+settings, but not read the key.
+
+Changing a crop size doesn't change crops already saved; they're padded with
+black bars until you re-crop them, and the app asks before saving such a change.
+
+You can also write `config.yaml` by hand, based on `config-example.yaml`. Saving
+from Settings rewrites the file, dropping any comments:
 
 ```yaml
 # Image dimensions for Meural Canvas
@@ -285,7 +305,7 @@ meural:
 1. Log into your Immich web interface
 2. Go to Account Settings → API Keys
 3. Create a new API key with only the permissions below
-4. Copy the key to your config file (never commit `config.yaml`; it's ignored by git)
+4. Paste it into Settings. It is stored in `config/config.yaml`, which git ignores; never commit it
 
 | Permission | Used for |
 |------------|----------|
@@ -307,9 +327,9 @@ any asset its user owns. For tighter isolation, create a dedicated Immich user
 for the cropper and share the input and output albums with it.
 
 ### Finding Album IDs
-1. Navigate to the album in Immich web interface
-2. The album ID is in the URL: `/albums/{album-id}`
-3. Or use Immich API: `GET /api/albums`
+Settings lists your albums by name, so you only need IDs when editing
+`config.yaml` by hand: open the album in Immich and copy the ID from the URL
+(`/albums/{album-id}`).
 
 ## 📖 Usage
 
@@ -438,6 +458,9 @@ endpoints take `{"identifier": "<asset-id>", ...}` and respond with the updated
 - `POST /complete`: upload all of an image's saved crops
 - `POST /upload-single`: upload one orientation (`orientation`)
 - `POST /upload-all`: start uploading every image with saved crops (background job)
+- `GET /settings`: current settings, without the API key (`has_api_key` instead), and `configured`
+- `PUT /settings`: validate, save and apply settings; a blank `immich.api_key` keeps the saved key for the saved URL
+- `POST /settings/albums`: list albums for a `url` and `api_key` before saving (same blank-key rule)
 - `GET /jobs/{id}`: job status and progress (`status`, `done`, `total`, `result`, `error`).
   Starting a job while another runs returns 409 with the running job.
 - `DELETE /delete-original`: remove an image from the input album (the photo stays in the library)

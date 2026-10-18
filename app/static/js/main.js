@@ -134,6 +134,10 @@ async function initializeApp() {
         // Set initialized state
         window.APP_STATE.initialized = true;
         console.log('Application initialization complete');
+
+        // First run: nothing works until Immich is connected.
+        const settings = await (await fetch('/settings')).json();
+        if (!settings.configured) showSettingsModal();
     } catch (error) {
         console.error('Failed to initialize:', error);
         if (window.ELEMENTS.imageGridEl) {

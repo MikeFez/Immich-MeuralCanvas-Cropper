@@ -17,11 +17,20 @@ class JobRunner:
         self._jobs = {}
         self._thread = None
 
+    def _running(self):
+        return next((j for j in self._jobs.values() if j["status"] == "running"), None)
+
+    def running(self):
+        """The running job, or None."""
+        with self._lock:
+            job = self._running()
+            return dict(job) if job else None
+
     def start(self, kind, work):
         """Run work(progress) in a thread. Returns (job, started); if a job is
         already running, nothing starts and that job is returned instead."""
         with self._lock:
-            running = next((j for j in self._jobs.values() if j["status"] == "running"), None)
+            running = self._running()
             if running:
                 return dict(running), False
             job = {"id": next(self._ids), "kind": kind, "status": "running",

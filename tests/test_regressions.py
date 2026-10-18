@@ -589,5 +589,132 @@ class CropRegressionTests(unittest.TestCase):
             self.assertEqual(output.getexif()[274], 1)
 
 
+    def keep_settings(self):
+        """Restore config.yaml and the applied settings after this test."""
+        import copy
+        config = self.app.config
+        snapshot, text = copy.deepcopy(config.settings), Path(config.CONFIG_FILE).read_text()
+        def restore():
+            Path(config.CONFIG_FILE).write_text(text)
+            config.apply_settings(snapshot)
+            self.app.immich_handler.configure(snapshot['immich'])
+            self.app.meural_handler.configure(snapshot['meural']['devices'])
+        self.addCleanup(restore)
+
+    def settings_payload(self, **immich):
+        return {'immich': {'url': 'http://127.0.0.1:1', 'api_key': '', 'input_album_id': 'source-album',
+                           'output_album_id': 'new-output', **immich},
+                'dimensions': {'portrait_size': [90, 160], 'landscape_size': [160, 90]},
+                'meural': {'devices': []}}
+
+    def test_settings_never_return_the_api_key(self):
+        response = self.client.get('/settings').json
+        self.assertTrue(response['configured'])
+        self.assertTrue(response['settings']['immich']['has_api_key'])
+        self.assertNotIn('api_key', response['settings']['immich'])
+        self.assertNotIn('test-only', json.dumps(response))
+
+    def test_settings_save_applies_without_restart_and_keeps_saved_key(self):
+        import os, stat, yaml
+        self.keep_settings()
+        payload = self.settings_payload()
+        payload['dimensions']['portrait_size'] = [60, 160]
+        payload['meural']['devices'] = [{'name': ' Hall ', 'ip': '10.0.0.5', 'preview_duration': 15}]
+        response = self.client.put('/settings', json=payload)
+        self.assertEqual(response.status_code, 200, response.json)
+        saved = yaml.safe_load(Path(self.app.config.CONFIG_FILE).read_text())
+        self.assertEqual(saved['immich']['api_key'], 'test-only')
+        self.assertEqual(saved['immich']['output_album_id'], 'new-output')
+        self.assertEqual(stat.S_IMODE(os.stat(self.app.config.CONFIG_FILE).st_mode), 0o600)
+        self.assertEqual(self.app.immich_handler.output_album_id, 'new-output')
+        self.assertEqual(self.app.immich_handler.api_key, 'test-only')
+        self.assertEqual(self.client.get('/dimensions').json['portrait'], {'width': 60, 'height': 160})
+        self.assertEqual(self.client.get('/meural/devices').json['devices'], [{'name': 'Hall', 'ip': '10.0.0.5'}])
+        self.assertNotIn('test-only', json.dumps(response.json))
+
+    def test_saved_key_is_never_sent_to_a_different_url(self):
+        self.keep_settings()
+        before = Path(self.app.config.CONFIG_FILE).read_text()
+        response = self.client.put('/settings', json=self.settings_payload(url='http://attacker.example'))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Re-enter the API key', response.json['error'])
+        self.assertEqual(Path(self.app.config.CONFIG_FILE).read_text(), before)
+        # Album lookups follow the same rule; the setUp guard fails any outbound request.
+        albums = self.client.post('/settings/albums', json={'url': 'http://attacker.example', 'api_key': ''})
+        self.assertEqual(albums.status_code, 400)
+        changed = self.client.put('/settings', json=self.settings_payload(url='http://other:2283', api_key=' new-key '))
+        self.assertEqual(changed.status_code, 200, changed.json)
+        self.assertEqual(self.app.immich_handler.api_key, 'new-key')
+
+    def test_settings_reject_invalid_values(self):
+        self.keep_settings()
+        cases = {
+            'url': (self.settings_payload(url='ftp://immich'), 'http://'),
+            'same albums': (self.settings_payload(output_album_id='source-album'), 'must be different'),
+            'no album': (self.settings_payload(input_album_id=' '), 'input album'),
+        }
+        size = self.settings_payload()
+        size['dimensions']['landscape_size'] = [0, 90]
+        cases['size'] = (size, 'Landscape size')
+        for label, device in {'device ip': {'name': 'A', 'ip': 'http://x/'},
+                              'device name': {'name': '', 'ip': '10.0.0.1'},
+                              'duration': {'name': 'A', 'ip': '10.0.0.1', 'preview_duration': 0}}.items():
+            payload = self.settings_payload()
+            payload['meural']['devices'] = [device]
+            cases[label] = (payload, '')
+        for label, (payload, message) in cases.items():
+            with self.subTest(label):
+                response = self.client.put('/settings', json=payload)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(message, response.json['error'])
+        self.assertEqual(self.app.immich_handler.output_album_id, 'output-album')
+
+    def test_settings_wait_for_running_job(self):
+        import threading
+        self.keep_settings()
+        release = threading.Event()
+        job, started = self.app.jobs.start('sync', lambda progress: release.wait(5))
+        self.assertTrue(started)
+        try:
+            response = self.client.put('/settings', json=self.settings_payload())
+            self.assertEqual(response.status_code, 409)
+            self.assertIn('sync', response.json['error'])
+        finally:
+            release.set()
+            self.app.jobs.join(5)
+
+    def test_album_list_merges_owned_and_shared_albums(self):
+        import requests
+        calls = []
+        def fake(handler, method, endpoint, **kwargs):
+            calls.append((handler.base_url, handler.api_key, endpoint, kwargs.get('params')))
+            if kwargs.get('params'):
+                return [{'id': 'b', 'albumName': 'beta', 'assetCount': 2, 'shared': True},
+                        {'id': 'a', 'albumName': 'Alpha', 'assetCount': 1}]
+            return [{'id': 'a', 'albumName': 'Alpha', 'assetCount': 1}]
+        with patch.object(self.app.ImmichHandler, '_make_request', autospec=True, side_effect=fake):
+            response = self.client.post('/settings/albums', json={'url': 'http://127.0.0.1:1/', 'api_key': ''})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual([album['name'] for album in response.json['albums']], ['Alpha', 'beta'])
+        self.assertTrue(response.json['albums'][1]['shared'])
+        self.assertEqual({call[:2] for call in calls}, {('http://127.0.0.1:1', 'test-only')})
+        rejected = requests.HTTPError(response=Mock(status_code=401))
+        with patch.object(self.app.ImmichHandler, '_make_request', side_effect=rejected):
+            response = self.client.post('/settings/albums', json={'url': 'http://new:2283', 'api_key': 'bad'})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('rejected the API key', response.json['error'])
+
+    def test_missing_config_starts_unconfigured(self):
+        config = self.app.config
+        with patch.object(config, 'CONFIG_FILE', str(Path(self.temporary.name) / 'missing.yaml')):
+            defaults = config.load_settings()
+        self.assertEqual(defaults, config.DEFAULT_SETTINGS)
+        self.assertFalse(config.is_configured(defaults))
+        with self.assertRaisesRegex(RuntimeError, 'not configured'):
+            self.app.ImmichHandler(defaults['immich']).get_album_assets('album')
+        with patch.object(config, 'is_configured', return_value=False):
+            self.assertEqual(self.app.initial_sync(), (None, False))
+
+
 if __name__ == '__main__':
     unittest.main()

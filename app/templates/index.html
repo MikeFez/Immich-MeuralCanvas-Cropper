@@ -12,6 +12,9 @@
 <body>
     <header class="app-header">
         <h1 class="app-title"><strong>Meural</strong> Canvas Image Cropper</h1>
+        <button id="btn-settings" class="header-button" title="Immich, Meural and crop settings">
+            <i class="fas fa-cog"></i> Settings
+        </button>
     </header>
 
     <div class="container-fluid app-container">
@@ -32,7 +35,7 @@
                                 <i class="fas fa-cloud-upload-alt"></i> Upload All
                             </button>
                             <button id="btn-manage" class="btn btn-sm btn-secondary" title="Manage processed images">
-                                <i class="fas fa-cog"></i> Manage
+                                <i class="fas fa-list"></i> Manage
                             </button>
                         </div>
                     </div>
@@ -159,7 +162,7 @@
     <div id="manage-modal" class="manage-modal" style="display: none;">
         <div class="manage-modal-content">
             <div class="manage-modal-header">
-                <h2><i class="fas fa-cog"></i> Manage Images</h2>
+                <h2><i class="fas fa-list"></i> Manage Images</h2>
                 <button id="manage-modal-close" class="manage-modal-close">
                     <i class="fas fa-times"></i>
                 </button>
@@ -201,6 +204,104 @@
         </div>
     </div>
 
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="manage-modal" style="display: none;">
+        <form id="settings-form" class="manage-modal-content settings-modal-content" novalidate>
+            <div class="manage-modal-header">
+                <h2><i class="fas fa-cog"></i> Settings</h2>
+                <button type="button" name="close" class="manage-modal-close" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="settings-body">
+                <p id="settings-welcome" class="settings-welcome" hidden>
+                    Connect to Immich to get started: enter its URL and an API key, load your albums,
+                    then choose where photos come from and where crops go.
+                </p>
+
+                <section class="settings-section">
+                    <h3>Immich</h3>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="settings-url">Server URL</label>
+                            <input id="settings-url" name="url" class="form-control" type="url"
+                                   placeholder="http://immich.local:2283" autocomplete="off">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="settings-api-key">API key</label>
+                            <input id="settings-api-key" name="api_key" class="form-control" type="password"
+                                   autocomplete="new-password">
+                        </div>
+                        <div class="col-12 form-text settings-permissions">
+                            Create the key in Immich under Account Settings → API Keys with
+                            <code>album.read</code>, <code>asset.read</code>, <code>asset.download</code>,
+                            <code>asset.upload</code>, <code>asset.delete</code>,
+                            <code>albumAsset.create</code> and <code>albumAsset.delete</code>.
+                        </div>
+                        <div class="col-12 d-flex align-items-center gap-2">
+                            <button type="button" name="load_albums" class="btn btn-sm btn-outline-secondary">
+                                <i class="fas fa-plug"></i> Connect &amp; load albums
+                            </button>
+                            <span id="settings-album-status" class="form-text"></span>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="settings-input-album">Input album</label>
+                            <select id="settings-input-album" name="input_album_id" class="form-select"></select>
+                            <div class="form-text">Photos to crop</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="settings-output-album">Output album</label>
+                            <select id="settings-output-album" name="output_album_id" class="form-select"></select>
+                            <div class="form-text">Where finished crops are uploaded</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="settings-section">
+                    <h3>Meural devices</h3>
+                    <div id="settings-devices" class="settings-devices"></div>
+                    <button type="button" name="add_device" class="btn btn-sm btn-outline-secondary">
+                        <i class="fas fa-plus"></i> Add device
+                    </button>
+                </section>
+
+                <section class="settings-section">
+                    <h3>Crop sizes</h3>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Portrait (width × height)</label>
+                            <div class="input-group">
+                                <input name="portrait_width" class="form-control" type="number" min="1" aria-label="Portrait width">
+                                <span class="input-group-text">×</span>
+                                <input name="portrait_height" class="form-control" type="number" min="1" aria-label="Portrait height">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Landscape (width × height)</label>
+                            <div class="input-group">
+                                <input name="landscape_width" class="form-control" type="number" min="1" aria-label="Landscape width">
+                                <span class="input-group-text">×</span>
+                                <input name="landscape_height" class="form-control" type="number" min="1" aria-label="Landscape height">
+                            </div>
+                        </div>
+                        <div class="col-12 form-text">
+                            Use your Meural's screen resolution. Crops saved at other proportions are padded
+                            with black bars until you re-crop them.
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <div class="settings-footer">
+                <button type="button" name="cancel" class="btn btn-meural btn-secondary">Cancel</button>
+                <button type="submit" name="save" class="btn btn-meural btn-success">
+                    <i class="fas fa-save"></i> Save
+                </button>
+            </div>
+        </form>
+    </div>
+
     <script>
         // Global state & initialization tracker with init protection
         window.APP_STATE = {
@@ -221,5 +322,6 @@
     <script src="/static/js/main.js"></script>
     <script src="/static/js/meural-service.js"></script>
     <script src="/static/js/manage-service.js"></script>
+    <script src="/static/js/settings-service.js"></script>
 </body>
 </html>

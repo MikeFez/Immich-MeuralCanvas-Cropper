@@ -40,7 +40,13 @@ const ELEMENT_IDS = {
     manageTableLoading: 'manage-table-loading',
     manageTableWrapper: 'manage-table-wrapper',
     manageTableEmpty: 'manage-table-empty',
-    manageTableBody: 'manage-table-body'
+    manageTableBody: 'manage-table-body',
+    btnSettings: 'btn-settings',
+    settingsModal: 'settings-modal',
+    settingsForm: 'settings-form',
+    settingsWelcome: 'settings-welcome',
+    settingsAlbumStatus: 'settings-album-status',
+    settingsDevices: 'settings-devices'
 };
 window.ELEMENTS = Object.fromEntries(Object.entries(ELEMENT_IDS).map(([key, id]) => {
     const element = document.getElementById(id);

@@ -201,6 +201,61 @@ const second = '22222222-2222-4222-8222-222222222222';
             dots: 'active - -', visible: editing });
         console.log('PASS: stage controls match each stage, including review with both orientations skipped');
 
+        // Settings: albums come from Immich (faked here); the saved key is never sent to the browser.
+        await page.route('**/settings/albums', route => route.fulfill({ json: { success: true, albums: [
+            { id: 'source-album', name: 'Queue', assets: 2, shared: false },
+            { id: 'output-album', name: 'Crops', assets: 0, shared: false },
+            { id: 'new-output', name: 'Shared crops', assets: 1, shared: true }] } }));
+        assert.ok(!JSON.stringify(await (await page.request.get(`${baseURL}/settings`)).json()).includes('test-only'));
+        const field = name => page.locator(`#settings-form [name="${name}"]`).first();
+        await page.locator('#btn-settings').click();
+        await page.waitForFunction(() => /Connected: 3 albums/.test(document.getElementById('settings-album-status').textContent));
+        assert.equal(await field('api_key').inputValue(), '');
+        assert.match(await field('api_key').getAttribute('placeholder'), /leave blank to keep/);
+        assert.equal(await field('input_album_id').inputValue(), 'source-album');
+        assert.ok(await page.locator('#settings-welcome').isHidden());
+        await field('url').fill('http://elsewhere:2283');
+        assert.equal(await field('api_key').getAttribute('placeholder'), 'Required for a new URL');
+        await page.unroute('**/settings/albums');
+        await page.locator('[name="load_albums"]').click();
+        await page.waitForFunction(() => /Re-enter the API key/.test(document.getElementById('settings-album-status').textContent));
+        await field('url').fill('http://127.0.0.1:1');
+        await field('portrait_width').fill('0');
+        await page.locator('[name="save"]').click();
+        // A size change warns first, since saved crops exist.
+        assert.match(await page.locator('.confirm-dialog').innerText(), /padded with black bars/);
+        await confirm();
+        await page.waitForFunction(() => [...document.querySelectorAll('.app-toast.error')].some(t => /Portrait size/.test(t.textContent)));
+        assert.ok(await page.locator('#settings-modal').isVisible());
+        await field('portrait_width').fill('90');
+        await field('output_album_id').selectOption('new-output');
+        await page.locator('[name="add_device"]').click();
+        await page.locator('.settings-device [name="name"]').last().fill('Hall');
+        await page.locator('.settings-device [name="ip"]').last().fill('10.0.0.9');
+        await page.locator('[name="save"]').click();
+        await page.waitForFunction(() => document.getElementById('settings-modal').style.display === 'none');
+        assert.ok((await toasts()).includes('Settings saved'));
+        const saved = (await (await page.request.get(`${baseURL}/settings`)).json()).settings;
+        assert.equal(saved.immich.output_album_id, 'new-output');
+        assert.ok(saved.immich.has_api_key);
+        assert.deepEqual(saved.meural.devices.map(device => device.name), ['Hall']);
+        console.log('PASS: Settings loads albums, keeps the saved key, refuses it for a new URL and saves');
+
+        // First run: without a configuration, Settings opens with the welcome text.
+        const fresh = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+        fresh.on('pageerror', error => errors.push(error.message));
+        await fresh.route('https://**', route => route.fulfill({ status: 200, body: '', contentType: 'text/css' }));
+        await fresh.route('**/settings', async route => {
+            if (route.request().method() !== 'GET') return route.continue();
+            const response = await route.fetch();
+            await route.fulfill({ response, json: { ...(await response.json()), configured: false } });
+        });
+        await fresh.goto(baseURL);
+        await fresh.waitForFunction(() => document.getElementById('settings-modal').style.display === 'flex');
+        assert.ok(await fresh.locator('#settings-welcome').isVisible());
+        await fresh.close();
+        console.log('PASS: first run opens Settings');
+
         assert.deepEqual(errors, []);
         assert.deepEqual(dialogs, [], 'native alert/confirm dialogs are not used');
         console.log('PASS: no uncaught browser errors or native dialogs');

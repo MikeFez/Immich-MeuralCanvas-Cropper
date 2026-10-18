@@ -1,7 +1,9 @@
+import copy
 import os
 import re
 import logging
 import io
+import requests
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, send_from_directory, send_file, abort
 from werkzeug.exceptions import HTTPException
@@ -42,9 +44,13 @@ migrate_legacy_state()
 app = Flask(__name__, static_url_path="/static", static_folder="static")
 
 # Configure clients without making startup depend on network availability.
-logging.info(f"Initializing connection to Immich at {config.IMMICH_URL}")
-immich_handler = ImmichHandler()
-meural_handler = MeuralHandler(config.MEURAL_DEVICES)
+# Without a config.yaml the app still starts, and the UI opens Settings.
+if config.is_configured():
+    logging.info(f"Using Immich at {config.settings['immich']['url']}")
+else:
+    logging.warning(f"Immich is not configured; set it up in Settings (saved to {config.CONFIG_FILE})")
+immich_handler = ImmichHandler(config.settings["immich"])
+meural_handler = MeuralHandler(config.settings["meural"]["devices"])
 
 jobs = JobRunner()
 ASSET_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -104,7 +110,9 @@ def run_sync(progress):
 
 def initial_sync():
     """Warm the input cache in the background; a failure leaves the web app available."""
-    return jobs.start("sync", run_sync)
+    if config.is_configured():
+        return jobs.start("sync", run_sync)
+    return None, False
 
 
 def job_response(job, started):
@@ -123,6 +131,57 @@ def index():
 def get_dimensions():
     """Get image dimensions from config"""
     return jsonify({o: {"width": w, "height": h} for o, (w, h) in SIZES.items()})
+
+
+def settings_view():
+    """Settings for the Settings form. The API key itself never leaves the server."""
+    view = copy.deepcopy(config.settings)
+    view["immich"]["has_api_key"] = bool(view["immich"].pop("api_key"))
+    return {"success": True, "settings": view, "configured": config.is_configured()}
+
+
+@app.route("/settings")
+def get_settings():
+    return jsonify(settings_view())
+
+
+@app.route("/settings/albums", methods=["POST"])
+def list_immich_albums():
+    """List albums for a URL and key under test, before they are saved."""
+    data = request.get_json() or {}
+    try:
+        login = config.resolve_immich_login(data.get("url"), data.get("api_key"))
+    except ValueError as e:
+        abort(400, str(e))
+    try:
+        albums = ImmichHandler(login).list_albums()
+    except requests.HTTPError as e:
+        status = e.response.status_code if e.response is not None else None
+        if status in (401, 403):
+            abort(400, "Immich rejected the API key (it needs the album.read permission)")
+        abort(502, f"Immich returned an error: {e}")
+    except (requests.ConnectionError, requests.Timeout):
+        abort(502, f"Could not reach Immich at {login['url']}")
+    except (requests.RequestException, ValueError) as e:
+        abort(502, f"Unexpected response from Immich: {e}")
+    return jsonify({"success": True, "albums": albums})
+
+
+@app.route("/settings", methods=["PUT"])
+def update_settings():
+    """Validate, save to config.yaml and apply without a restart."""
+    running = jobs.running()
+    if running:
+        abort(409, f"Wait for the running {running['kind']} to finish")
+    try:
+        new = config.validate_settings(request.get_json(silent=True))
+    except ValueError as e:
+        abort(400, str(e))
+    config.save_settings(new)
+    immich_handler.configure(new["immich"])
+    meural_handler.configure(new["meural"]["devices"])
+    logging.info("Settings saved to %s", config.CONFIG_FILE)
+    return jsonify(settings_view())
 
 
 @app.route("/images")

@@ -6,14 +6,13 @@ class MeuralHandler:
     """Handler for Meural Canvas devices to preview images directly."""
 
     def __init__(self, devices_config):
-        """Initialize the Meural handler with device configurations.
+        self.configure(devices_config)
 
-        Args:
-            devices_config (list): List of device configurations from config.yaml
-        """
+    def configure(self, devices_config):
+        """Use these devices (the meural.devices list from the config)."""
         self.devices = devices_config
         self._validate_config()
-        logging.info(f"Initialized MeuralHandler with {len(self.devices)} devices")
+        logging.info(f"Configured {len(self.devices)} Meural devices")
 
     def _validate_config(self):
         """Validate device configurations."""

@@ -8,36 +8,25 @@ import logging
 from datetime import datetime, timezone
 from PIL import Image
 from utils.file_handler import image_lock, remove_cached_image, write_json_atomic
-from config import (
-    IMMICH_URL,
-    IMMICH_API_KEY,
-    IMMICH_INPUT_ALBUM_ID,
-    IMMICH_OUTPUT_ALBUM_ID,
-)
 
 
 class ImmichHandler:
-    def __init__(self):
-        # Validate Immich configuration
-        self.base_url = IMMICH_URL.rstrip("/")
-        self.api_key = IMMICH_API_KEY
-        self.input_album_id = IMMICH_INPUT_ALBUM_ID
-        self.output_album_id = IMMICH_OUTPUT_ALBUM_ID
+    def __init__(self, settings):
+        self.configure(settings)
 
-        if not self.base_url:
-            raise ValueError("IMMICH_URL not configured in config.yaml")
-        if not self.api_key:
-            raise ValueError("IMMICH_API_KEY not configured in config.yaml")
-        if not self.input_album_id:
-            raise ValueError("IMMICH_INPUT_ALBUM_ID not configured in config.yaml")
-        if not self.output_album_id:
-            raise ValueError("IMMICH_OUTPUT_ALBUM_ID not configured in config.yaml")
-
+    def configure(self, settings):
+        """Point at a server; settings is the immich section of the config (fields may be blank)."""
+        self.base_url = (settings.get("url") or "").rstrip("/")
+        self.api_key = settings.get("api_key") or ""
+        self.input_album_id = settings.get("input_album_id") or ""
+        self.output_album_id = settings.get("output_album_id") or ""
         self.headers = {"x-api-key": self.api_key, "Accept": "application/json"}
 
 
     def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """Make an HTTP request to the Immich API"""
+        if not self.base_url or not self.api_key:
+            raise RuntimeError("Immich is not configured; open Settings")
         url = f"{self.base_url}/api{endpoint}"
         logging.info(f"Making Immich API request: {method} {url}")
         kwargs.setdefault("timeout", (5, 60))
@@ -69,6 +58,8 @@ class ImmichHandler:
 
     def get_album_assets(self, album_id: str) -> List[Dict[str, Any]]:
         """Get all assets from a specified album"""
+        if not album_id:
+            raise RuntimeError("Immich is not configured; open Settings")
         album_data = self._make_request("GET", f"/albums/{album_id}")
 
         if (
@@ -78,6 +69,20 @@ class ImmichHandler:
         ):
             return album_data["assets"]
         raise ValueError("Invalid Immich album response: missing assets list")
+
+    def list_albums(self) -> List[Dict[str, Any]]:
+        """Albums the key's user owns or that are shared with them, sorted by name."""
+        albums = {}
+        # Without ?shared, Immich lists owned albums; ?shared=true adds ones shared with the user.
+        for params in (None, {"shared": "true"}):
+            response = self._make_request("GET", "/albums", params=params)
+            if not isinstance(response, list):
+                raise ValueError("Invalid Immich album list response")
+            for album in response:
+                if isinstance(album, dict) and album.get("id"):
+                    albums[album["id"]] = {"id": album["id"], "name": album.get("albumName") or "Untitled",
+                                           "assets": album.get("assetCount", 0), "shared": bool(album.get("shared"))}
+        return sorted(albums.values(), key=lambda album: album["name"].lower())
 
     def download_asset(self, asset_id: str, save_dir: str) -> tuple[bool, str]:
         """Download atomically; normalize formats browsers cannot display to JPEG."""
