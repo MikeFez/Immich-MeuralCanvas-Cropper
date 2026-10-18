@@ -2,6 +2,7 @@ import os
 import json
 import tempfile
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime, timezone
@@ -178,8 +179,12 @@ class ImmichHandler:
             logging.error(f"Failed to add assets to album: {e}")
             return False
 
-    def sync_input_images(self, input_folder):
-        """Repair the cache and reconcile it with a successfully fetched source album."""
+    def sync_input_images(self, input_folder, progress=None, workers=4):
+        """Repair the cache and reconcile it with a successfully fetched source album.
+
+        Assets are checked and downloaded in parallel; progress(done, total) is
+        called as each one finishes.
+        """
         assets = self.get_album_assets(self.input_album_id)
         if any(not isinstance(asset, dict) or not asset.get('id') for asset in assets):
             raise ValueError('Invalid source album asset')
@@ -191,9 +196,8 @@ class ImmichHandler:
             if name.endswith('.json') and name[:-5] not in active_ids:
                 remove_cached_image(name[:-5])
 
-        available = []
-        failures = []
-        for asset in assets:
+        def ensure_cached(asset):
+            """Return the cache entry for one asset, downloading it if missing or stale; None on failure."""
             asset_id = asset['id']
             with image_lock(asset_id):
                 cached = None
@@ -211,12 +215,22 @@ class ImmichHandler:
                 if cached is None:
                     success, path = self.download_asset(asset_id, input_folder)
                     if not success:
-                        failures.append(asset_id)
-                        continue
+                        return None
                     with open(os.path.join(metadata_dir, f'{asset_id}.json')) as f:
                         cached = json.load(f)
-                available.append({'asset_id': asset_id, 'file_path': path,
-                                  'original_filename': cached.get('original_filename', '')})
+                return {'asset_id': asset_id, 'file_path': path,
+                        'original_filename': cached.get('original_filename', '')}
+
+        if progress:
+            progress(0, len(assets))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(ensure_cached, asset) for asset in assets]
+            for done, _ in enumerate(as_completed(futures), 1):
+                if progress:
+                    progress(done, len(assets))
+        results = [future.result() for future in futures]
+        available = [entry for entry in results if entry]
+        failures = [asset['id'] for asset, entry in zip(assets, results) if not entry]
         if failures:
             raise RuntimeError(f'Could not download {len(failures)} source image(s); retry Sync')
         return available

@@ -1,7 +1,6 @@
 import os
 import re
 import logging
-import threading
 import io
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, send_from_directory, send_file, abort
@@ -27,6 +26,7 @@ from utils.file_handler import (
 )
 from utils.image_processor import render_image, write_image_atomic, validate_crop, upright_size
 from utils.meural_handler import MeuralHandler
+from utils.jobs import JobRunner
 
 # Configure logging
 logging.basicConfig(
@@ -46,7 +46,7 @@ logging.info(f"Initializing connection to Immich at {config.IMMICH_URL}")
 immich_handler = ImmichHandler()
 meural_handler = MeuralHandler(config.MEURAL_DEVICES)
 
-sync_lock = threading.Lock()
+jobs = JobRunner()
 ASSET_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 
@@ -98,16 +98,20 @@ def image_response(asset_id, **extra):
     return jsonify({"success": True, "image": get_image(asset_id), **extra})
 
 
+def run_sync(progress):
+    return {"images": len(immich_handler.sync_input_images(config.INPUT_FOLDER, progress=progress))}
+
+
 def initial_sync():
-    """Warm the input cache without blocking startup or overlapping manual sync."""
-    if not sync_lock.acquire(blocking=False):
-        return
-    try:
-        immich_handler.sync_input_images(config.INPUT_FOLDER)
-    except Exception:
-        logging.exception("Initial sync failed; the web app remains available")
-    finally:
-        sync_lock.release()
+    """Warm the input cache in the background; a failure leaves the web app available."""
+    return jobs.start("sync", run_sync)
+
+
+def job_response(job, started):
+    """202 with the new job, or 409 with the job already running."""
+    if started:
+        return jsonify({"success": True, "job": job}), 202
+    return jsonify({"success": False, "error": f"{job['kind']} is already running", "job": job}), 409
 
 
 @app.route("/")
@@ -186,14 +190,16 @@ def reset_image(asset_id):
 
 @app.route("/sync", methods=["POST"])
 def sync_with_immich():
-    """Sync images from Immich input album; a concurrent request is a no-op."""
-    if not sync_lock.acquire(blocking=False):
-        return jsonify({"success": True, "message": "Sync already in progress", "images": get_image_list()})
-    try:
-        immich_handler.sync_input_images(config.INPUT_FOLDER)
-        return jsonify({"success": True, "images": get_image_list()})
-    finally:
-        sync_lock.release()
+    """Start syncing the Immich input album; poll /jobs/<id> for progress."""
+    return job_response(*jobs.start("sync", run_sync))
+
+
+@app.route("/jobs/<int:job_id>")
+def get_job(job_id):
+    job = jobs.get(job_id)
+    if not job:
+        abort(404, "Job not found")
+    return jsonify({"success": True, "job": job})
 
 
 class UploadFailure(RuntimeError):
@@ -256,25 +262,30 @@ def upload_single_crop(asset_id):
         abort(500, str(e))
 
 
-@app.route("/upload-all", methods=["POST"])
-def upload_all_processed():
-    """Process one asset at a time, reporting partial failures explicitly."""
+def run_upload_all(progress):
+    """Upload every cached image with saved crops, one at a time, reporting partial failures."""
     uploaded, failed = [], []
+    # Saved coordinates survive removal from the source album; skip those images.
+    pending = [asset_id for asset_id, entry in read_all_crop_metadata().items()
+               if get_filename_from_asset_id(asset_id) and any(saved_crop(entry, o) for o in ORIENTATIONS)]
     # One album fetch for the whole batch; each crop only matches its own entry.
     album_assets = immich_handler.get_album_assets(immich_handler.output_album_id)
-    for asset_id, entry in read_all_crop_metadata().items():
-        if not get_filename_from_asset_id(asset_id):
-            continue  # Saved coordinates survive removal from the source album.
-        if not any(saved_crop(entry, o) for o in ORIENTATIONS):
-            continue
+    progress(0, len(pending))
+    for done, asset_id in enumerate(pending, 1):
         try:
             uploaded.extend(upload_saved_crops(asset_id, album_assets=album_assets))
         except UploadFailure as e:
             uploaded.extend(e.uploaded_files)
             failed.append(asset_id)
-    return jsonify({'success': not failed, 'uploaded_assets': uploaded,
-                    'failed_assets': failed,
-                    'error': 'Some crops could not be uploaded' if failed else None}), (502 if failed else 200)
+        progress(done, len(pending))
+    return {'success': not failed, 'uploaded_assets': uploaded, 'failed_assets': failed,
+            'error': 'Some crops could not be uploaded' if failed else None}
+
+
+@app.route("/upload-all", methods=["POST"])
+def upload_all_processed():
+    """Start uploading all saved crops; poll /jobs/<id> for progress."""
+    return job_response(*jobs.start("upload-all", run_upload_all))
 
 
 @app.route("/delete-original", methods=["DELETE"])
@@ -318,16 +329,17 @@ def health():
     return jsonify({"status": "ok"})
 
 
-threading.Thread(target=initial_sync, name="initial-immich-sync", daemon=True).start()
-
-
 if __name__ == "__main__":
     logging.info("Starting Meural Canvas Image Cropper")
-    logging.info(f"Using temporary directory: {config.APP_TMP_DIR}")
+    logging.info(f"Using image cache directory: {config.CACHE_DIR}")
 
-    debug_mode = os.getenv('FLASK_DEBUG', '0').lower() in ('1', 'true', 'yes', 'on')
-    if not debug_mode:
-        # Suppress per-request logs and the development server warning
-        logging.getLogger('werkzeug').setLevel(logging.ERROR)
-
-    app.run(host="0.0.0.0", port=5000, debug=debug_mode, threaded=True)
+    if os.getenv('FLASK_DEBUG', '0').lower() in ('1', 'true', 'yes', 'on'):
+        # Development server with auto-reload; sync only in the reloaded child process.
+        if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+            initial_sync()
+        app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
+    else:
+        initial_sync()
+        # Production server. Keep a single process: per-image locks and jobs live in memory.
+        from waitress import serve
+        serve(app, host="0.0.0.0", port=5000, threads=8)

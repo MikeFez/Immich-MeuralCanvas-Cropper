@@ -30,7 +30,7 @@ meural:
 ''')
     sys.path.insert(0, str(ROOT / 'app'))
     with patch.dict(os.environ, {'CONFIG_DIR': str(directory / 'config'),
-                                 'APP_TMP_DIR': str(directory / 'cache')}):
+                                 'CACHE_DIR': str(directory / 'cache')}):
         # Importing the app must not make synchronous network requests. Its
         # background cache warmup is disabled for this isolated test fixture.
         with patch('threading.Thread.start'), patch('requests.get') as get, patch('requests.request') as request:

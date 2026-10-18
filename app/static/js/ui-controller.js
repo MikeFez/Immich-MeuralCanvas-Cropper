@@ -231,4 +231,61 @@ function showView(viewName) {
     }
 }
 
+/**
+ * Non-blocking notification (replaces alert). Errors stay longer; click to dismiss.
+ * @param {string} type - 'info', 'success' or 'error'
+ */
+function showToast(message, type = 'info') {
+    let stack = document.getElementById('toast-stack');
+    if (!stack) {
+        stack = makeElement('div', 'toast-stack');
+        stack.id = 'toast-stack';
+        document.body.appendChild(stack);
+    }
+    const toast = makeElement('div', `app-toast ${type}`, message);
+    toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    const dismiss = () => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+    };
+    toast.addEventListener('click', dismiss);
+    stack.appendChild(toast);
+    setTimeout(dismiss, type === 'error' ? 8000 : 3000);
+}
+
+/**
+ * Promise-based confirmation in the app's dialog style (replaces confirm).
+ * Enter confirms, Escape or a click outside cancels.
+ */
+function confirmDialog(message, confirmLabel = 'OK', danger = false) {
+    return new Promise(resolve => {
+        const overlay = makeElement('div', 'meural-device-dialog confirm-dialog');
+        const content = makeElement('div', 'meural-device-dialog-content');
+        const buttons = makeElement('div', 'dialog-buttons');
+        const cancel = makeElement('button', 'btn btn-meural btn-secondary', 'Cancel');
+        const ok = makeElement('button', `btn btn-meural${danger ? ' btn-danger' : ''} confirm-ok`, confirmLabel);
+        const close = result => {
+            document.removeEventListener('keydown', onKey, true);
+            overlay.remove();
+            resolve(result);
+        };
+        // Capture phase, so Escape here does not also close the Manage modal underneath.
+        const onKey = event => {
+            if (event.key !== 'Escape' && event.key !== 'Enter') return;
+            event.preventDefault();
+            event.stopPropagation();
+            close(event.key === 'Enter');
+        };
+        cancel.addEventListener('click', () => close(false));
+        ok.addEventListener('click', () => close(true));
+        overlay.addEventListener('click', event => { if (event.target === overlay) close(false); });
+        document.addEventListener('keydown', onKey, true);
+        buttons.append(cancel, ok);
+        content.append(makeElement('p', 'confirm-message', message), buttons);
+        overlay.append(content);
+        document.body.append(overlay);
+        ok.focus();
+    });
+}
+
 document.addEventListener('DOMContentLoaded', ensureElementsInitialized);

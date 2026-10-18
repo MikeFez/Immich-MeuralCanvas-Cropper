@@ -572,6 +572,7 @@ body {
     margin-top: 15px;
     display: flex;
     justify-content: flex-end;
+    gap: 8px;
 }
 
 /* Manage modal */
@@ -779,23 +780,41 @@ body {
     padding: 20px;
 }
 
-.manage-notification {
+/* Toasts and confirmation dialog */
+.toast-stack {
     position: fixed;
     top: 20px;
     right: 20px;
+    z-index: 3000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 320px;
+}
+
+.app-toast {
     padding: 12px 20px;
     border-radius: 6px;
     color: white;
     font-weight: 500;
-    z-index: 3000;
-    max-width: 300px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.2);
     transition: opacity 0.3s ease;
     background-color: #17a2b8;
+    cursor: pointer;
 }
 
-.manage-notification.success { background-color: #28a745; }
-.manage-notification.error { background-color: #dc3545; }
+.app-toast.success { background-color: #28a745; }
+.app-toast.error { background-color: #dc3545; }
+
+/* Above the Manage modal, which can open it */
+.confirm-dialog {
+    z-index: 2500;
+}
+
+.confirm-message {
+    margin-bottom: 0;
+}
+
 
 /* Responsive: width */
 @media (max-width: 992px) {

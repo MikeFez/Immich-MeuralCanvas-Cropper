@@ -1,11 +1,8 @@
-1. Fix the portrait/landscape icons which indicate if metadata exists for that type
-2. Better align metadata with immich on sync. As in, we should add keys to each orientation to determine if it's been deleted from immich
-3. Delete images from immich when skipped, but ONLY should the image already exist in the destination album.
-4. Add a `Manage` button next to the sync and upload all buttons. If clicked, a full screen modal appears containing the following:
-  - A 3 column table with the following columns:
-    - Original Image
-    - Portrait Image
-    - Landscape Image
-  - Under Portrait and Landscape, there should be 3 buttons - one to delete the image, one to reupload it, and another to recrop it - which closes the modal and opens the appropriate crop page.
-  - Under Original, there should be a button to delete it. Not from the destination album, but from the source album
-5. Fix crop selector when doing so from the manage view
+1. Reconcile upload records with Immich on sync: if an orientation's `uploaded.asset_id`
+   is no longer in the destination album (deleted in Immich), clear that record so the
+   image shows as pending again. The record lives in `crops/metadata.json`.
+2. When a crop is skipped (or deleted in Manage) and it was already uploaded, also remove
+   the uploaded copy from the destination album. Only act when the upload record's
+   `asset_id` is actually in the destination album; use `ImmichHandler.trash_asset`.
+
+Done: status icons per orientation, the Manage modal, re-crop from Manage.

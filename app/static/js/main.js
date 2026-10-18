@@ -68,7 +68,7 @@ async function initializeApp() {
         try {
             await action();
         } catch (error) {
-            alert(error.message || String(error));
+            showToast(error.message || String(error), 'error');
         } finally {
             window.APP_STATE.cropBusy = false;
             buttons.forEach(([button, disabled]) => { if (button) button.disabled = disabled; });
@@ -261,9 +261,9 @@ function navigateToNextImage() {
             showView('no-image-view');
 
             if (showOnlyUnprocessed) {
-                alert('All unprocessed images have been completed! Turn off the filter to see all images.');
+                showToast('All unprocessed images are done. Turn off the filter to see all images.', 'success');
             } else {
-                alert('All images have been processed! Well done!');
+                showToast('All images have been processed!', 'success');
             }
         }
     });

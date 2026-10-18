@@ -136,7 +136,7 @@ function createManageTableRow(image) {
  * Delete a crop image (portrait or landscape)
  */
 async function deleteCropImage(identifier, orientation) {
-    if (!confirm(`Are you sure you want to delete the ${orientation} crop?`)) {
+    if (!await confirmDialog(`Delete the ${orientation} crop?`, 'Delete', true)) {
         return;
     }
 
@@ -147,10 +147,10 @@ async function deleteCropImage(identifier, orientation) {
             window.APP_STATE[orientation + 'Crop'] = { x: 0, y: 0, width: 0, height: 0 };
             clearPreviewImage(orientation);
         }
-        showManageNotification(`${orientation} crop deleted successfully`, 'success');
+        showToast(`${orientation} crop deleted successfully`, 'success');
     } catch (error) {
         console.error(`Error deleting ${orientation} crop:`, error);
-        showManageNotification(`Error deleting ${orientation} crop: ${error.message}`, 'error');
+        showToast(`Error deleting ${orientation} crop: ${error.message}`, 'error');
     }
 }
 
@@ -158,7 +158,7 @@ async function deleteCropImage(identifier, orientation) {
  * Re-upload a crop image to Immich
  */
 async function reuploadCropImage(identifier, orientation, button) {
-    if (!confirm(`Are you sure you want to re-upload the ${orientation} crop to Immich?`)) {
+    if (!await confirmDialog(`Re-upload the ${orientation} crop to Immich?`, 'Re-upload')) {
         return;
     }
 
@@ -169,10 +169,10 @@ async function reuploadCropImage(identifier, orientation, button) {
         if (button) button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
 
         await postJSON('/upload-single', { identifier, orientation });
-        showManageNotification(`${orientation} crop uploaded successfully`, 'success');
+        showToast(`${orientation} crop uploaded successfully`, 'success');
     } catch (error) {
         console.error(`Error uploading ${orientation} crop:`, error);
-        showManageNotification(`Error uploading ${orientation} crop: ${error.message}`, 'error');
+        showToast(`Error uploading ${orientation} crop: ${error.message}`, 'error');
     } finally {
         // Reset button state
         if (button) {
@@ -195,8 +195,9 @@ function recropImage(identifier, orientation) {
  * Delete original image from source album
  */
 async function deleteOriginalImage(identifier, button) {
-    const confirmed = confirm(
-        'Remove this image from the source album? The original photo will remain in your Immich library.'
+    const confirmed = await confirmDialog(
+        'Remove this image from the source album? The original photo will remain in your Immich library.',
+        'Remove', true
     );
 
     if (!confirmed) return;
@@ -215,10 +216,10 @@ async function deleteOriginalImage(identifier, button) {
             window.APP_STATE.currentImage = null;
             showView('no-image-view');
         }
-        showManageNotification('Removed from source album', 'success');
+        showToast('Removed from source album', 'success');
     } catch (error) {
         console.error('Error deleting original image:', error);
-        showManageNotification(`Error deleting original image: ${error.message}`, 'error');
+        showToast(`Error deleting original image: ${error.message}`, 'error');
     } finally {
         // Reset button state
         if (button) {
@@ -226,33 +227,6 @@ async function deleteOriginalImage(identifier, button) {
             button.innerHTML = originalContent;
         }
     }
-}
-
-/**
- * Show notification in manage modal
- */
-function showManageNotification(message, type = 'info') {
-    let notification = document.getElementById('manage-notification');
-    if (!notification) {
-        notification = document.createElement('div');
-        notification.id = 'manage-notification';
-        document.body.appendChild(notification);
-    }
-    notification.textContent = message;
-    notification.className = `manage-notification ${type}`;
-
-    // Show notification
-    notification.style.opacity = '1';
-
-    // Auto-hide after 3 seconds
-    setTimeout(() => {
-        notification.style.opacity = '0';
-        setTimeout(() => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
-        }, 300);
-    }, 3000);
 }
 
 /**

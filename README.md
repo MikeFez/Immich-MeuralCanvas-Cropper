@@ -101,9 +101,12 @@ A comprehensive web application designed to seamlessly crop images from Immich f
    docker run -it -p 5001:5000 \
      -v $(pwd)/config:/config \
      -v $(pwd)/app:/app \
+     -e FLASK_DEBUG=1 \
      --name meural-cropper \
      meural-cropper
-   ```   #### Option C: Using Docker Compose
+   ```
+
+   #### Option C: Using Docker Compose
    Create a `docker-compose.yml` file:
    ```yaml
    version: '3.8'
@@ -116,12 +119,11 @@ A comprehensive web application designed to seamlessly crop images from Immich f
          - "5001:5000"
        volumes:
          - ./config:/config
+       environment:
+         - PUID=1000   # owner of ./config on the host (`id -u`)
+         - PGID=1000   # `id -g`
        restart: unless-stopped
-       healthcheck:
-         test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-         interval: 30s
-         timeout: 10s
-         retries: 3
+       # The image has a built-in HEALTHCHECK against /health.
 
      # For development with live reload
      meural-cropper-dev:
@@ -133,7 +135,6 @@ A comprehensive web application designed to seamlessly crop images from Immich f
          - ./config:/config
          - ./app:/app
        environment:
-         - FLASK_ENV=development
          - FLASK_DEBUG=1
        profiles:
          - dev
@@ -232,11 +233,25 @@ The application will be available at `http://localhost:5001`
 The application will be available at `http://localhost:5000`.
 
 Local runs use the repository's `config/` directory; Docker uses `/config`.
-Set `CONFIG_DIR` to override the configuration and persistent data directory,
-or `APP_TMP_DIR` to override the disposable image cache. Crop coordinates and
-upload records persist together in `CONFIG_DIR/crops/metadata.json`. On startup, images sync
-in the background so an unavailable Immich server does not block the UI;
-use **Sync** to retry a failed connection.
+Everything lives in that one directory:
+
+| Path | Contents |
+|------|----------|
+| `config.yaml` | Your configuration |
+| `crops/metadata.json` | Crop coordinates and upload records |
+| `cache/` | Downloaded source images and thumbnails. Disposable: Sync rebuilds it, but keeping it avoids re-downloading every original after the container is recreated. |
+
+Set `CONFIG_DIR` to move the whole directory, or `CACHE_DIR` (formerly
+`APP_TMP_DIR`) to keep the cache elsewhere, e.g. if you back up `/config` and
+don't want the images in the backup. On startup, images sync in the background
+so an unavailable Immich server does not block the UI; the Sync and Upload All
+buttons show progress and can be used to retry.
+
+The container runs the app as `PUID:PGID` (default `1000:1000`), not root, and
+takes ownership of `/config` on startup so files stay editable from the host.
+Set them to the host owner of your config directory. It serves with Waitress,
+a production WSGI server, in a single process (the per-image locks and
+background jobs live in memory, so don't run multiple workers).
 
 ## ⚙️ Configuration
 
@@ -379,7 +394,7 @@ duplicate of the existing one, the existing copy is kept.
 
 ### Data Management
 Only the configuration directory needs to persist across container updates;
-the source-image and thumbnail cache under `APP_TMP_DIR` is rebuilt by Sync:
+the source-image and thumbnail cache in `/config/cache` is rebuilt by Sync if lost:
 ```bash
 docker run -v /host/path/config:/config ...
 ```
@@ -400,10 +415,12 @@ endpoints take `{"identifier": "<asset-id>", ...}` and respond with the updated
 - `POST /reset`: delete both saved crops
 
 ### Immich
-- `POST /sync`: sync the input album into the local cache
+- `POST /sync`: start syncing the input album into the local cache (background job)
 - `POST /complete`: upload all of an image's saved crops
 - `POST /upload-single`: upload one orientation (`orientation`)
-- `POST /upload-all`: upload every image with saved crops
+- `POST /upload-all`: start uploading every image with saved crops (background job)
+- `GET /jobs/{id}`: job status and progress (`status`, `done`, `total`, `result`, `error`).
+  Starting a job while another runs returns 409 with the running job.
 - `DELETE /delete-original`: remove an image from the input album (the photo stays in the library)
 
 ### Meural
@@ -451,8 +468,7 @@ endpoints take `{"identifier": "<asset-id>", ...}` and respond with the updated
 # Install development dependencies
 pip install -r requirements.txt
 
-# Set development environment
-export FLASK_ENV=development
+# Debug mode uses Flask's auto-reloading dev server instead of Waitress
 export FLASK_DEBUG=1
 
 # Run with auto-reload

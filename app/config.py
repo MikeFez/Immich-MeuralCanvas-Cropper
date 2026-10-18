@@ -1,5 +1,4 @@
 import os
-import tempfile
 import yaml
 
 
@@ -29,12 +28,12 @@ def load_config():
 
 config = load_config()
 
-# Application paths (under /tmp to handle container temp storage)
-APP_TMP_DIR = os.environ.get(
-    "APP_TMP_DIR", os.path.join(tempfile.gettempdir(), "meural-cropper")
-)
-INPUT_FOLDER = os.path.join(APP_TMP_DIR, "input")
-THUMBNAIL_FOLDER = os.path.join(APP_TMP_DIR, "thumbnails")
+# Disposable cache of source images and thumbnails, rebuilt by Sync. It lives
+# under CONFIG_DIR by default so a single /config mount persists everything.
+# APP_TMP_DIR is the former name of CACHE_DIR.
+CACHE_DIR = os.environ.get("CACHE_DIR") or os.environ.get("APP_TMP_DIR") or os.path.join(CONFIG_DIR, "cache")
+INPUT_FOLDER = os.path.join(CACHE_DIR, "input")
+THUMBNAIL_FOLDER = os.path.join(CACHE_DIR, "thumbnails")
 # Image dimensions
 PORTRAIT_SIZE = tuple(config["dimensions"]["portrait_size"])  # (width, height)
 LANDSCAPE_SIZE = tuple(config["dimensions"]["landscape_size"])  # (width, height)

@@ -8,6 +8,32 @@
 let syncInProgress = false;
 
 /**
+ * Start a background job ('sync' or 'upload-all') and resolve with its result.
+ * If the same kind of job is already running (e.g. the startup sync), follow it instead.
+ * @param {function} onProgress - called with the job while it runs
+ */
+async function runJob(kind, onProgress) {
+    const response = await fetch(`/${kind}`, { method: 'POST' });
+    const data = await response.json().catch(() => ({}));
+    let job = data.job;
+    if (!job || (!response.ok && job.kind !== kind)) throw new Error(data.error || `${kind} failed`);
+    while (job.status === 'running') {
+        onProgress?.(job);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const poll = await fetch(`/jobs/${job.id}`);
+        if (!poll.ok) throw new Error(`Lost track of ${kind} job`);
+        job = (await poll.json()).job;
+    }
+    if (job.status === 'failed') throw new Error(job.error || `${kind} failed`);
+    return job.result;
+}
+
+/** "Label 3/10" while a job runs, once its total is known. */
+function progressLabel(label, job) {
+    return job.total ? `${label} ${job.done}/${job.total}` : `${label}…`;
+}
+
+/**
  * Sync images from Immich input album
  */
 async function syncWithImmich() {
@@ -24,10 +50,8 @@ async function syncWithImmich() {
         button.textContent = 'Syncing…';
     }
     try {
-        const response = await fetch('/sync', { method: 'POST' });
-        const data = await response.json();
-        if (!response.ok || !data.success) throw new Error(data.error || 'Sync failed');
-        const images = data.images || await (await fetch('/images')).json();
+        const result = await runJob('sync', job => { if (button) button.textContent = progressLabel('Syncing', job); });
+        const images = await (await fetch('/images')).json();
         window.APP_STATE.imageList = images;
         if (current) {
             const updated = images.find(image => image.asset_id === current.asset_id);
@@ -35,9 +59,9 @@ async function syncWithImmich() {
             if (updated && current.source_version !== updated.source_version) changedImage = current.asset_id;
         }
         synced = true;
-        return data;
+        return result;
     } catch (error) {
-        alert('Error syncing with Immich: ' + error.message);
+        showToast('Error syncing with Immich: ' + error.message, 'error');
         throw error;
     } finally {
         syncInProgress = window.APP_STATE.syncing = false;
@@ -56,21 +80,14 @@ async function syncWithImmich() {
 /**
  * Upload all processed images to Immich
  */
-function uploadAllToImmich() {
-    // Don't allow uploads during sync
+async function uploadAllToImmich() {
     if (syncInProgress || window.APP_STATE.syncing) {
-        console.log("Upload blocked - sync in progress");
-        return Promise.resolve({ success: false, message: "Sync in progress" });
+        return { success: false, message: "Sync in progress" };
     }
-
-    return fetch('/upload-all', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    })
-    .then(response => response.json())
-    .then(async data => {
+    const button = window.ELEMENTS.btnImmichUploadEl;
+    const label = button?.innerHTML;
+    try {
+        const data = await runJob('upload-all', job => { if (button) button.textContent = progressLabel('Uploading', job); });
         // Refresh even on partial failure: some images may now be completed.
         if (data.uploaded_assets?.length) {
             window.APP_STATE.imageList = await fetch('/images').then(response => response.json());
@@ -83,14 +100,15 @@ function uploadAllToImmich() {
                 ? `${uploaded} crop(s) uploaded, ${failed} image(s) failed. ${data.error || ''}`.trim()
                 : data.error || 'Unknown error');
         }
-        alert(`Successfully uploaded ${data.uploaded_assets?.length || 0} images to Immich`);
+        showToast(`Uploaded ${data.uploaded_assets?.length || 0} crops to Immich`, 'success');
         return data.uploaded_assets;
-    })
-    .catch(error => {
+    } catch (error) {
         console.error('Error uploading to Immich:', error);
-        alert('Error uploading to Immich: ' + error);
+        showToast('Error uploading to Immich: ' + error.message, 'error');
         throw error;
-    });
+    } finally {
+        if (button) button.innerHTML = label;
+    }
 }
 
 /** POST JSON and return the parsed body, throwing the server's error on failure. */

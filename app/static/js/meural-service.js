@@ -92,7 +92,7 @@ function showMeuralDeviceDialog(callback) {
     // Get the devices first
     getMeuralDevices().then(devices => {
         if (devices.length === 0) {
-            alert('No Meural devices configured. Please add devices in config.yaml.');
+            showToast('No Meural devices configured. Add devices in config.yaml.', 'error');
             return;
         }
 
@@ -144,12 +144,12 @@ function previewCurrentOnMeural() {
     const currentStage = window.APP_STATE.currentStage;
 
     if (!currentImage) {
-        alert('No image selected.');
+        showToast('No image selected.', 'error');
         return;
     }
 
     if (window.APP_STATE.syncing) {
-        alert('Cannot preview while syncing.');
+        showToast('Cannot preview while syncing.', 'error');
         return;
     }
 
@@ -160,7 +160,7 @@ function previewCurrentOnMeural() {
     const useLandscape = currentStage === 2 || (currentStage === 3 && window.APP_STATE.landscapeCrop.width > 0);
 
     if (!usePortrait && !useLandscape) {
-        alert('No crop available to preview.');
+        showToast('No crop available to preview.', 'error');
         return;
     }
 
@@ -184,11 +184,11 @@ function previewCurrentOnMeural() {
         previewOnMeural(deviceIp, identifier, orientation, useTempCrop, cropData)
             .then(result => {
                 if (!result.success) {
-                    alert(`Error: ${result.message || result.error}`);
+                    showToast(`Meural preview failed: ${result.message || result.error}`, 'error');
                 }
             })
             .catch(error => {
-                alert(`Error: ${error.toString()}`);
+                showToast(`Meural preview failed: ${error.message || error}`, 'error');
             })
             .finally(() => {
                 // Reset button

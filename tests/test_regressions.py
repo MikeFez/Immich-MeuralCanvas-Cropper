@@ -54,12 +54,70 @@ class CropRegressionTests(unittest.TestCase):
         return self.client.post('/crop', json={'identifier': ASSET, 'orientation': orientation,
                                               'crop': PORTRAIT if crop is None else crop})
 
+    def run_job(self, url):
+        """POST a job endpoint, wait for it, and return the finished job."""
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 202)
+        self.app.jobs.join(5)
+        return self.client.get(f"/jobs/{response.json['job']['id']}").json['job']
+
     def test_offline_app_and_health_are_available(self):
         with patch.object(self.app.immich_handler, 'sync_input_images', side_effect=ConnectionError('offline')):
-            self.app.initial_sync()
-        self.assertFalse(self.app.sync_lock.locked())
+            job, started = self.app.initial_sync()
+            self.app.jobs.join(5)
+        self.assertTrue(started)
+        self.assertEqual(self.app.jobs.get(job['id'])['status'], 'failed')
         self.assertEqual(self.client.get('/health').status_code, 200)
         self.assertEqual(self.client.get('/').status_code, 200)
+
+    def test_sync_job_reports_progress_and_rejects_overlap(self):
+        import threading
+        reported, release = threading.Event(), threading.Event()
+        def slow_sync(folder, progress):
+            progress(1, 3)
+            reported.set()
+            release.wait(5)
+            progress(3, 3)
+            return [{}, {}, {}]
+        with patch.object(self.app.immich_handler, 'sync_input_images', side_effect=slow_sync):
+            first = self.client.post('/sync')
+            self.assertEqual(first.status_code, 202)
+            job_id = first.json['job']['id']
+            self.assertTrue(reported.wait(5))
+            running = self.client.get(f'/jobs/{job_id}').json['job']
+            self.assertEqual((running['status'], running['done'], running['total']), ('running', 1, 3))
+            overlap = self.client.post('/upload-all')
+            self.assertEqual(overlap.status_code, 409)
+            self.assertEqual(overlap.json['job']['id'], job_id)
+            release.set()
+            self.app.jobs.join(5)
+        finished = self.client.get(f'/jobs/{job_id}').json['job']
+        self.assertEqual((finished['status'], finished['result']), ('done', {'images': 3}))
+        self.assertEqual(self.client.get('/jobs/9999').status_code, 404)
+
+    def test_sync_downloads_in_parallel_and_reports_each_asset(self):
+        import threading
+        ids = [f'{n}{n}{n}{n}{n}{n}{n}{n}-0000-4000-8000-000000000000' for n in range(2, 8)]
+        active, peak, lock = 0, 0, threading.Lock()
+        def download(asset_id, folder):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            threading.Event().wait(0.05)
+            seed_image(self.app, asset_id)
+            with lock:
+                active -= 1
+            return True, str(Path(folder) / f'{asset_id}.jpg')
+        updates = []
+        handler = self.app.immich_handler
+        with patch.object(handler, 'get_album_assets', return_value=[{'id': ASSET}] + [{'id': i} for i in ids]), \
+             patch.object(handler, 'download_asset', side_effect=download):
+            result = handler.sync_input_images(self.app.config.INPUT_FOLDER, progress=lambda d, t: updates.append((d, t)))
+        self.assertEqual([entry['asset_id'] for entry in result], [ASSET] + ids)
+        self.assertGreater(peak, 1)
+        self.assertEqual(updates[0], (0, 7))
+        self.assertEqual(updates[-1], (7, 7))
 
     def complete(self):
         return self.client.post('/complete', json={'identifier': ASSET})
@@ -219,11 +277,11 @@ class CropRegressionTests(unittest.TestCase):
     def test_batch_partial_failure_never_marks_asset_completed(self):
         self.save()
         with patch.object(self.app.immich_handler, 'upload_asset', side_effect=['uploaded', RuntimeError('offline')]):
-            response = self.client.post('/upload-all')
-        self.assertEqual(response.status_code, 502)
-        self.assertFalse(response.json['success'])
-        self.assertEqual(response.json['failed_assets'], [ASSET])
-        self.assertEqual(len(response.json['uploaded_assets']), 1)
+            job = self.run_job('/upload-all')
+        self.assertEqual((job['status'], job['done'], job['total']), ('done', 1, 1))
+        self.assertFalse(job['result']['success'])
+        self.assertEqual(job['result']['failed_assets'], [ASSET])
+        self.assertEqual(len(job['result']['uploaded_assets']), 1)
         self.assertEqual(self.image()['status'], 'both')
 
     def test_corrupt_metadata_is_not_overwritten(self):
