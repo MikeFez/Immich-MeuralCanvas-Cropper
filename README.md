@@ -242,7 +242,7 @@ Set `CONFIG_DIR` to move the whole directory, or `CACHE_DIR` (formerly
 `APP_TMP_DIR`) to keep the cache elsewhere, e.g. if you back up `/config` and
 don't want the images in the backup. On startup, images sync in the background
 so an unavailable Immich server does not block the UI; the Sync and Upload All
-buttons show progress and can be used to retry.
+buttons (in Manage) show progress and can be used to retry.
 
 The container runs the app as `PUID:PGID` (default `1000:1000`), not root, and
 takes ownership of `/config` on startup so files stay editable from the host.
@@ -368,9 +368,9 @@ Settings lists your albums by name, so you only need IDs when editing
 - **Escape**: Cancel current operation
 
 #### Batch Operations
-- Use the "Upload All" button to generate and upload all completed crops from metadata
-- Filter view to show only unprocessed images
-- Progress indicators show batch operation status
+- Open Manage (top right) for Sync, which downloads new and changed photos from the input album, and Upload All, which renders and uploads every saved crop
+- Filter view to show only unprocessed images; the count beside the switch shows how many are listed
+- Progress shows on the Sync and Upload All buttons, and the Manage icon spins while either runs
 - Images are generated fresh during upload for consistent quality
 
 #### Quality Settings

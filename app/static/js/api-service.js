@@ -33,6 +33,17 @@ function progressLabel(label, job) {
     return job.total ? `${label} ${job.done}/${job.total}` : `${label}…`;
 }
 
+/** Spin the header's Manage icon while a Sync or Upload All job runs. */
+function showJobRunning(running) {
+    const icon = window.ELEMENTS.btnManageEl?.querySelector('i');
+    if (icon) icon.className = running ? 'fas fa-sync-alt fa-spin' : 'fas fa-list';
+}
+
+/** Refresh the Manage table after a job, if it is open. */
+function refreshManageModal() {
+    if (window.ELEMENTS.manageModalEl.style.display !== 'none') loadManageData();
+}
+
 /**
  * Sync images from Immich input album
  */
@@ -45,6 +56,7 @@ async function syncWithImmich() {
     let changedImage = null;
     let synced = false;
     syncInProgress = window.APP_STATE.syncing = true;
+    showJobRunning(true);
     if (button) {
         button.disabled = true;
         button.textContent = 'Syncing…';
@@ -65,6 +77,7 @@ async function syncWithImmich() {
         throw error;
     } finally {
         syncInProgress = window.APP_STATE.syncing = false;
+        showJobRunning(false);
         if (button) {
             button.disabled = false;
             button.innerHTML = '<i class="fas fa-sync-alt"></i> Sync';
@@ -73,6 +86,7 @@ async function syncWithImmich() {
             renderImageList();
             if (!window.APP_STATE.currentImage) showView('no-image-view');
             else if (changedImage) selectImage(changedImage);
+            refreshManageModal();
         }
     }
 }
@@ -86,12 +100,14 @@ async function uploadAllToImmich() {
     }
     const button = window.ELEMENTS.btnImmichUploadEl;
     const label = button?.innerHTML;
+    showJobRunning(true);
     try {
         const data = await runJob('upload-all', job => { if (button) button.textContent = progressLabel('Uploading', job); });
         // Refresh even on partial failure: some images may now be completed.
         if (data.uploaded_assets?.length) {
             window.APP_STATE.imageList = await fetch('/images').then(response => response.json());
             renderImageList();
+            refreshManageModal();
         }
         if (!data.success) {
             const uploaded = data.uploaded_assets?.length || 0;
@@ -107,6 +123,7 @@ async function uploadAllToImmich() {
         showToast('Error uploading to Immich: ' + error.message, 'error');
         throw error;
     } finally {
+        showJobRunning(false);
         if (button) button.innerHTML = label;
     }
 }

@@ -8,7 +8,8 @@
  * Show the manage modal
  */
 function showManageModal() {
-    if (window.APP_STATE.cropBusy || window.APP_STATE.syncing) return;
+    // Opens during a sync too, so its progress is visible on the Sync button.
+    if (window.APP_STATE.cropBusy) return;
     const modal = window.ELEMENTS.manageModalEl;
     if (!modal) return;
 

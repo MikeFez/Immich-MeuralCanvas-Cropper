@@ -12,9 +12,14 @@
 <body>
     <header class="app-header">
         <h1 class="app-title"><strong>Meural</strong> Canvas Image Cropper</h1>
-        <button id="btn-settings" class="header-button" title="Immich, Meural and crop settings">
-            <i class="fas fa-cog"></i> Settings
-        </button>
+        <div class="header-actions">
+            <button id="btn-manage" class="header-button" title="Sync, upload and manage processed images">
+                <i class="fas fa-list"></i> Manage
+            </button>
+            <button id="btn-settings" class="header-button" title="Immich, Meural and crop settings">
+                <i class="fas fa-cog"></i> Settings
+            </button>
+        </div>
     </header>
 
     <div class="container-fluid app-container">
@@ -22,24 +27,6 @@
             <!-- Sidebar with zero left padding -->
             <div class="col-3">
                 <div class="sidebar">
-                    <div class="sidebar-header">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <span>Image Library</span>
-                            <span class="badge bg-light text-dark" id="image-count">0</span>
-                        </div>
-                        <div class="d-flex gap-2">
-                            <button id="btn-immich-sync" class="btn btn-sm btn-primary" title="Sync with Immich input album">
-                                <i class="fas fa-sync-alt"></i> Sync
-                            </button>
-                            <button id="btn-immich-upload" class="btn btn-sm btn-success" title="Upload all processed images to Immich">
-                                <i class="fas fa-cloud-upload-alt"></i> Upload All
-                            </button>
-                            <button id="btn-manage" class="btn btn-sm btn-secondary" title="Manage processed images">
-                                <i class="fas fa-list"></i> Manage
-                            </button>
-                        </div>
-                    </div>
-
                     <div class="filter-container">
                       <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" id="show-unprocessed-only">
@@ -47,6 +34,7 @@
                           Show unprocessed images only
                         </label>
                       </div>
+                      <span class="badge bg-secondary" id="image-count" title="Images shown">0</span>
                     </div>
 
                     <div id="image-grid" class="image-grid-container">
@@ -169,6 +157,15 @@
             </div>
 
             <div class="manage-modal-body">
+                <div class="manage-toolbar">
+                    <button id="btn-immich-sync" class="btn btn-primary" title="Download new and changed photos from the Immich input album">
+                        <i class="fas fa-sync-alt"></i> Sync
+                    </button>
+                    <button id="btn-immich-upload" class="btn btn-success" title="Upload every saved crop to the Immich output album">
+                        <i class="fas fa-cloud-upload-alt"></i> Upload All
+                    </button>
+                    <span class="manage-toolbar-help">Sync downloads the input album; Upload All sends every saved crop to the output album.</span>
+                </div>
                 <div class="manage-table-container">
                     <div class="manage-table-loading" id="manage-table-loading">
                         <div class="spinner-border text-primary" role="status">

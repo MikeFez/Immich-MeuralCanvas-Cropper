@@ -51,6 +51,10 @@ const second = '22222222-2222-4222-8222-222222222222';
         console.log('PASS: the image library is laid out as a grid');
         await page.route('**/sync', route => route.fulfill({ status: 500, contentType: 'application/json',
             body: JSON.stringify({ success: false, error: 'simulated sync failure' }) }));
+        // The library panel holds only the filter, the count and the images; Sync lives in Manage.
+        assert.equal(await page.locator('.sidebar button').count(), 0);
+        assert.equal(await page.locator('.filter-container #image-count').innerText(), '2');
+        await page.locator('#btn-manage').click();
         await page.locator('#btn-immich-sync').click();
         await page.waitForFunction(() => !window.APP_STATE.syncing);
         assert.ok((await toasts()).some(message => message.includes('simulated sync failure')));
@@ -58,7 +62,9 @@ const second = '22222222-2222-4222-8222-222222222222';
         await page.locator('#btn-immich-sync').click();
         await page.waitForFunction(() => !window.APP_STATE.syncing);
         assert.equal(await page.locator('.image-grid-item').count(), 2);
-        console.log('PASS: Sync failures are visible and a retry refreshes the image list');
+        assert.equal(await page.locator('#btn-manage i').getAttribute('class'), 'fas fa-list');
+        await page.keyboard.press('Escape');
+        console.log('PASS: Sync (in Manage) reports failures and a retry refreshes the image list');
         await page.locator(`[data-identifier="${asset}"]`).click();
         await page.waitForFunction(() => window._cropRectangleInitialized);
         assert.equal(await page.evaluate(() => window.APP_STATE.currentStage), 1);
