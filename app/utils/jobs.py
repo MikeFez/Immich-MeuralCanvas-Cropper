@@ -6,6 +6,7 @@ albums, and overlapping them gains nothing. The UI polls a job by ID for progres
 import itertools
 import logging
 import threading
+import time
 
 KEEP = 10  # finished jobs retained for polling
 
@@ -16,6 +17,8 @@ class JobRunner:
         self._ids = itertools.count(1)
         self._jobs = {}
         self._thread = None
+        self._started = {}   # kind -> time.monotonic() of the last start
+        self._finished = {}  # kind -> ID of the last job that completed
 
     def _running(self):
         return next((j for j in self._jobs.values() if j["status"] == "running"), None)
@@ -36,6 +39,7 @@ class JobRunner:
             job = {"id": next(self._ids), "kind": kind, "status": "running",
                    "done": 0, "total": 0, "result": None, "error": None}
             self._jobs[job["id"]] = job
+            self._started[kind] = time.monotonic()
             for old in sorted(self._jobs)[:-KEEP]:
                 del self._jobs[old]
             self._thread = threading.Thread(target=self._run, args=(job, work), name=f"job-{kind}", daemon=True)
@@ -50,10 +54,21 @@ class JobRunner:
             result = work(progress)
             with self._lock:
                 job.update(status="done", result=result)
+                self._finished[job["kind"]] = job["id"]
         except Exception as e:
             logging.exception("%s job failed", job["kind"])
             with self._lock:
                 job.update(status="failed", error=str(e))
+
+    def last_started(self, kind):
+        """time.monotonic() when a job of this kind last started, or None."""
+        with self._lock:
+            return self._started.get(kind)
+
+    def last_finished(self, kind):
+        """ID of the last job of this kind that completed, or None."""
+        with self._lock:
+            return self._finished.get(kind)
 
     def get(self, job_id):
         with self._lock:

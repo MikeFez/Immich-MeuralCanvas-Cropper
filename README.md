@@ -52,68 +52,21 @@ A comprehensive web application designed to seamlessly crop images from Immich f
 
 ### Docker (Recommended)
 
-1. **Clone the repository**:
-   ```bash
-   git clone <repository-url>
-   cd Immich-MeuralCanvas-Cropper
-   ```
+A ready-made image is published for every change to `main`:
+`ghcr.io/mikefez/immich-meuralcanvas-cropper:latest` (also tagged `main`, and
+`sha-<commit>` to pin an exact version). There's nothing to clone or build.
 
-2. **Create the config directory** (the app saves its settings there):
+1. **Create the config directory** (the app saves its settings, crops and image
+   cache there):
    ```bash
    mkdir -p config
    ```
 
-3. **Configure in the browser**: once the app is running (next step), it opens
-   **Settings** on first start. See [Configuration](#configuration).
-
-4. **Build and run**:
-
-   #### Option A: Using Makefile (Recommended)
-   ```bash
-   # Production mode
-   make run
-
-   # Development mode (with live code reloading)
-   make dev
-
-   # View logs
-   make logs
-
-   # Stop container
-   make stop
-
-   # Clean up
-   make clean
-   ```
-
-   #### Option B: Using Docker directly
-   ```bash
-   # Build the image
-   docker build -t meural-cropper .
-
-   # Run in production mode
-   docker run -d -p 5001:5000 \
-     -v $(pwd)/config:/config \
-     --name meural-cropper \
-     meural-cropper
-
-   # Run in development mode
-   docker run -it -p 5001:5000 \
-     -v $(pwd)/config:/config \
-     -v $(pwd)/app:/app \
-     -e FLASK_DEBUG=1 \
-     --name meural-cropper \
-     meural-cropper
-   ```
-
-   #### Option C: Using Docker Compose
-   Create a `docker-compose.yml` file:
+2. **Run it**, with Docker Compose (`docker-compose.yml`):
    ```yaml
-   version: '3.8'
-
    services:
      meural-cropper:
-       build: .
+       image: ghcr.io/mikefez/immich-meuralcanvas-cropper:latest
        container_name: meural-cropper
        ports:
          - "5001:5000"
@@ -124,87 +77,49 @@ A comprehensive web application designed to seamlessly crop images from Immich f
          - PGID=1000   # `id -g`
        restart: unless-stopped
        # The image has a built-in HEALTHCHECK against /health.
-
-     # For development with live reload
-     meural-cropper-dev:
-       build: .
-       container_name: meural-cropper-dev
-       ports:
-         - "5001:5000"
-       volumes:
-         - ./config:/config
-         - ./app:/app
-       environment:
-         - FLASK_DEBUG=1
-       profiles:
-         - dev
    ```
-
-   Then run:
    ```bash
-   # Production
-   docker-compose up -d
-
-   # Development
-   docker-compose --profile dev up -d
-
-   # View logs
-   docker-compose logs -f
-
-   # Stop
-   docker-compose down
+   docker compose up -d
    ```
 
-### Quick Start Example
+   or with Docker directly:
+   ```bash
+   docker run -d -p 5001:5000 \
+     -v "$(pwd)/config:/config" \
+     -e PUID=$(id -u) -e PGID=$(id -g) \
+     --restart unless-stopped \
+     --name meural-cropper \
+     ghcr.io/mikefez/immich-meuralcanvas-cropper:latest
+   ```
 
-Here's a complete example from clone to running:
+3. **Open http://localhost:5001**. Settings opens on first start; see
+   [Configuration](#configuration).
+
+To update: `docker compose pull && docker compose up -d` (or pull the image and
+recreate the container).
+
+### Building from source
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-repo/Immich-MeuralCanvas-Cropper.git
+git clone https://github.com/MikeFez/Immich-MeuralCanvas-Cropper.git
 cd Immich-MeuralCanvas-Cropper
-
-# Create the config directory; Settings opens on first start to fill it in
 mkdir -p config
 
-# Start the application (choose one method)
-
-# Method 1: Using Makefile (easiest)
-make run
-
-# Method 2: Using Docker Compose
-docker-compose up -d
-
-# Method 3: Using Docker directly
-docker build -t meural-cropper .
-docker run -d -p 5001:5000 -v $(pwd)/config:/config --name meural-cropper meural-cropper
-
-# Access the application
-open http://localhost:5001
+make run    # build and run on port 5001
+make dev    # with live code reloading (mounts ./app)
+make logs   # follow the logs
+make stop   # stop the container
 ```
 
-### Docker Volume Persistence
-
-For production deployments, ensure data persistence with proper volume mounting:
-
-```bash
-# Create persistent directories
-mkdir -p ./data/config
-
-# Run with persistent storage
-docker run -d -p 5001:5000 \
-  -v ./data/config:/config \
-  --name meural-cropper \
-  meural-cropper
-```
-
-The application will be available at `http://localhost:5001`
+Without Make: `docker build -t meural-cropper .`, then run it as above with
+`meural-cropper` as the image. For live reloading, add `-v "$(pwd)/app:/app"
+-e FLASK_DEBUG=1`.
 
 ### Manual Installation
 
 1. **Clone and setup**:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/MikeFez/Immich-MeuralCanvas-Cropper.git
    cd Immich-MeuralCanvas-Cropper
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -240,9 +155,10 @@ Everything lives in that one directory:
 
 Set `CONFIG_DIR` to move the whole directory, or `CACHE_DIR` (formerly
 `APP_TMP_DIR`) to keep the cache elsewhere, e.g. if you back up `/config` and
-don't want the images in the backup. On startup, images sync in the background
-so an unavailable Immich server does not block the UI; the Sync and Upload All
-buttons (in Manage) show progress and can be used to retry.
+don't want the images in the backup. Images sync in the background on startup
+and then on the Settings interval, so an unavailable Immich server does not
+block the UI; the Sync and Upload All buttons (in Manage) show progress and can
+be used to retry.
 
 The container runs the app as `PUID:PGID` (default `1000:1000`), not root, and
 takes ownership of `/config` on startup so files stay editable from the host.
@@ -258,7 +174,9 @@ Open **Settings** (top right). On first start it opens by itself.
    for the permissions it needs).
 2. Click **Connect & load albums**, then choose the **input album** (photos to
    crop) and the **output album** (where crops go). Albums shared with you are
-   listed too; the two must be different.
+   listed too; the two must be different. **Sync every** sets how often the
+   input album is checked for new and changed photos (default 15 minutes; 0
+   turns it off). Open pages pick up the changes by themselves.
 3. Add your Meural Canvas devices (optional) and set the crop sizes to your
    Canvas's resolution.
 4. **Save**. Settings take effect immediately, without a restart, and choosing
@@ -273,6 +191,7 @@ settings, but not read the key.
 
 Changing a crop size doesn't change crops already saved; they're padded with
 black bars until you re-crop them, and the app asks before saving such a change.
+Every crop then counts as not uploaded, since Immich has it at the old size.
 
 You can also write `config.yaml` by hand, based on `config-example.yaml`. Saving
 from Settings rewrites the file, dropping any comments:
@@ -299,6 +218,10 @@ meural:
     - name: "Bedroom Canvas"
       ip: "192.168.1.137"
       preview_duration: 15
+
+# How often to sync the input album, in minutes (0 = off)
+sync:
+  interval_minutes: 15
 ```
 
 ### Getting Immich API Key
@@ -340,13 +263,18 @@ Settings lists your albums by name, so you only need IDs when editing
    - You'll see the landing page with image selection sidebar
 
 2. **Select an Image**
-   - Browse images from the configured Immich album
+   - Browse images from the configured Immich album. Only images that still
+     need work are listed at first; turn off "Show unprocessed images only" to
+     see them all (your choice is remembered in this browser)
    - Click on any image to start cropping
    - Previously cropped images show status indicators
 
 3. **Create Portrait Crop**
    - Adjust the crop rectangle by dragging corners or edges
    - The aspect ratio is automatically maintained at 9:16
+   - Below the image, the app shows how many of the original's pixels the crop
+     uses, and warns when the crop is smaller than the output size and will be
+     enlarged (it may look soft on the Canvas)
    - Click "Crop and Continue" to save the portrait crop
 
 4. **Create Landscape Crop**
@@ -357,7 +285,8 @@ Settings lists your albums by name, so you only need IDs when editing
 5. **Review and Upload**
    - Preview both crops in the final review stage
    - Use "Preview on Meural" to test on your canvas devices
-   - Click "Upload Crops" to save to Immich output album
+   - Click "Upload Crops" to save to Immich output album (crops already in
+     Immich unchanged aren't sent again)
 
 ### Advanced Features
 
@@ -368,7 +297,7 @@ Settings lists your albums by name, so you only need IDs when editing
 - **Escape**: Cancel current operation
 
 #### Batch Operations
-- Open Manage (top right) for Sync, which downloads new and changed photos from the input album, and Upload All, which renders and uploads every saved crop
+- Open Manage (top right) for Sync, which downloads new and changed photos from the input album, and Upload All, which renders and uploads every crop that is new or changed since its last upload (or was uploaded at a different size). Manage's Re-upload sends one crop again regardless
 - Filter view to show only unprocessed images; the count beside the switch shows how many are listed
 - Progress shows on the Sync and Upload All buttons, and the Manage icon spins while either runs
 - Images are generated fresh during upload for consistent quality
@@ -455,12 +384,14 @@ endpoints take `{"identifier": "<asset-id>", ...}` and respond with the updated
 
 ### Immich
 - `POST /sync`: start syncing the input album into the local cache (background job)
-- `POST /complete`: upload all of an image's saved crops
+- `POST /complete`: upload an image's saved crops that aren't already in Immich
 - `POST /upload-single`: upload one orientation (`orientation`)
-- `POST /upload-all`: start uploading every image with saved crops (background job)
+- `POST /upload-all`: start uploading every new or changed crop (background job)
 - `GET /settings`: current settings, without the API key (`has_api_key` instead), and `configured`
 - `PUT /settings`: validate, save and apply settings; a blank `immich.api_key` keeps the saved key for the saved URL
 - `POST /settings/albums`: list albums for a `url` and `api_key` before saving (same blank-key rule)
+- `GET /jobs`: the running job, if any, and `last_sync`, the ID of the last completed sync
+  (the UI polls this to refresh after scheduled syncs)
 - `GET /jobs/{id}`: job status and progress (`status`, `done`, `total`, `result`, `error`).
   Starting a job while another runs returns 409 with the running job.
 - `DELETE /delete-original`: remove an image from the input album (the photo stays in the library)

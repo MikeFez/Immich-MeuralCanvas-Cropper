@@ -33,13 +33,14 @@ function hideSettingsModal() {
 }
 
 function fillSettingsForm(settings, configured) {
-    const { immich, meural, dimensions } = settings;
+    const { immich, meural, dimensions, sync } = settings;
     window.ELEMENTS.settingsWelcomeEl.hidden = configured;
     settingsField('url').value = immich.url;
     settingsField('api_key').value = '';
     updateKeyPlaceholder();
     for (const name of ['input_album_id', 'output_album_id']) setAlbumOptions(settingsField(name), [], immich[name]);
     setAlbumStatus('');
+    settingsField('sync_interval').value = sync.interval_minutes;
     window.ELEMENTS.settingsDevicesEl.replaceChildren(...meural.devices.map(deviceRow));
     for (const orientation of ['portrait', 'landscape']) {
         const [width, height] = dimensions[`${orientation}_size`];
@@ -147,6 +148,7 @@ function readSettingsForm() {
             output_album_id: settingsField('output_album_id').value
         },
         meural: { devices },
+        sync: { interval_minutes: number('sync_interval') },
         dimensions: {
             portrait_size: [number('portrait_width'), number('portrait_height')],
             landscape_size: [number('landscape_width'), number('landscape_height')]
@@ -162,7 +164,7 @@ async function saveSettings(event) {
         payload.dimensions[key].join() !== previous.dimensions[key].join());
     if (sizesChanged && window.APP_STATE.imageList.some(image => image.crops.portrait || image.crops.landscape) &&
         !await confirmDialog('Saved crops keep their current proportions and will be padded with black bars ' +
-            'until you re-crop them. Change the crop sizes?', 'Change sizes')) {
+            'until you re-crop them, and every crop will need uploading again. Change the crop sizes?', 'Change sizes')) {
         return;
     }
     const save = settingsField('save');
@@ -183,6 +185,7 @@ async function saveSettings(event) {
     if (sizesChanged) {
         await initializeConfig();
         if (window.APP_STATE.currentImage) updateStage();
+        await refreshImages(); // Every crop now needs uploading at the new size.
     }
     // A different album or server means a different set of source images.
     const before = previous.immich, after = data.settings.immich;

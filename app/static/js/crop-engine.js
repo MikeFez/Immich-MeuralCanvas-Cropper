@@ -321,6 +321,22 @@ function updateCropValues() {
     const stage = window.APP_STATE.currentStage;
     if (stage === 1) window.APP_STATE.portraitCrop = crop;
     else if (stage === 2) window.APP_STATE.landscapeCrop = crop;
+    if (STAGE_ORIENTATIONS[stage]) showCropResolution(crop, STAGE_ORIENTATIONS[stage]);
+}
+
+/** Show how many original pixels the crop uses, warning when the output enlarges them. */
+function showCropResolution(crop, orientation) {
+    const element = window.ELEMENTS.cropResolutionEl;
+    const { width, height } = getDimensions(orientation);
+    const scale = width / crop.width;
+    const used = `${Math.round(crop.width)}×${Math.round(crop.height)} px`;
+    // Allow a little slack: a few percent of enlargement isn't visible.
+    const low = scale > 1.05;
+    element.classList.toggle('low', low);
+    element.textContent = low
+        ? `Low resolution: ${used} of the original will be enlarged ${scale.toFixed(1)}× to ${width}×${height} and may look soft`
+        : `Uses ${used} of the original`;
+    element.hidden = false;
 }
 
 /**

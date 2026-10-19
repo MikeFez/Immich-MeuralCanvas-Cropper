@@ -54,6 +54,11 @@ class CropRegressionTests(unittest.TestCase):
         return self.client.post('/crop', json={'identifier': ASSET, 'orientation': orientation,
                                               'crop': PORTRAIT if crop is None else crop})
 
+    def uploaded(self, orientation):
+        """Record the saved crop as uploaded at the current size."""
+        crop = self.saved(orientation)
+        self.files.mark_uploaded(ASSET, orientation, orientation[0], crop, self.app.config.SIZES[orientation])
+
     def run_job(self, url):
         """POST a job endpoint, wait for it, and return the finished job."""
         response = self.client.post(url)
@@ -180,8 +185,8 @@ class CropRegressionTests(unittest.TestCase):
 
     def test_recrop_after_upload_makes_image_pending_again(self):
         self.save()
-        self.files.mark_uploaded(ASSET, 'portrait', 'p', PORTRAIT)
-        self.files.mark_uploaded(ASSET, 'landscape', 'l', LANDSCAPE)
+        self.uploaded('portrait')
+        self.uploaded('landscape')
         self.assertEqual(self.image()['status'], 'completed')
         response = self.crop(crop={**PORTRAIT, 'x': 60})
         self.assertEqual(response.status_code, 200)
@@ -216,7 +221,7 @@ class CropRegressionTests(unittest.TestCase):
 
     def test_delete_updates_status_and_keeps_upload_record(self):
         self.save()
-        self.files.mark_uploaded(ASSET, 'portrait', 'p', PORTRAIT)
+        self.uploaded('portrait')
         response = self.client.delete(f'/crop-data/{ASSET}/portrait')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json['image']['crops'], {'portrait': None, 'landscape': LANDSCAPE})
@@ -284,6 +289,52 @@ class CropRegressionTests(unittest.TestCase):
         self.assertEqual(len(job['result']['uploaded_assets']), 1)
         self.assertEqual(self.image()['status'], 'both')
 
+    def test_upload_all_sends_only_new_or_changed_crops(self):
+        self.save()
+        self.uploaded('portrait')
+        with patch.object(self.app.immich_handler, 'upload_asset', return_value='remote') as upload:
+            job = self.run_job('/upload-all')
+            self.assertEqual([c.args[1] for c in upload.call_args_list], [f'{ASSET}_landscape.jpg'])
+            self.assertTrue(job['result']['success'])
+            self.assertEqual(self.image()['status'], 'completed')
+            # Nothing changed: no album fetch, no uploads.
+            upload.reset_mock()
+            self.app.immich_handler.get_album_assets.reset_mock()
+            job = self.run_job('/upload-all')
+            upload.assert_not_called()
+            self.app.immich_handler.get_album_assets.assert_not_called()
+            self.assertEqual((job['result']['success'], job['result']['uploaded_assets'], job['total']), (True, [], 0))
+            # A new selection is sent again.
+            self.crop(crop={**PORTRAIT, 'x': 60})
+            self.run_job('/upload-all')
+            self.assertEqual([c.args[1] for c in upload.call_args_list], [f'{ASSET}_portrait.jpg'])
+
+    def test_complete_skips_crops_already_in_immich_and_reupload_forces(self):
+        self.save()
+        self.uploaded('portrait')
+        with patch.object(self.app.immich_handler, 'upload_asset', return_value='remote') as upload:
+            response = self.complete()
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([c.args[1] for c in upload.call_args_list], [f'{ASSET}_landscape.jpg'])
+            upload.reset_mock()
+            response = self.complete()
+            self.assertEqual((response.status_code, response.json['uploaded_files']), (200, []))
+            upload.assert_not_called()
+            # Manage's Re-upload sends an up-to-date crop anyway.
+            response = self.client.post('/upload-single', json={'identifier': ASSET, 'orientation': 'portrait'})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([c.args[1] for c in upload.call_args_list], [f'{ASSET}_portrait.jpg'])
+
+    def test_new_output_size_makes_uploaded_crops_pending(self):
+        self.save(False)
+        self.uploaded('portrait')
+        self.assertEqual(self.image()['status'], 'completed')
+        with patch.dict(self.app.config.SIZES, portrait=(45, 80)):
+            self.assertEqual(self.image()['status'], 'portrait')
+            # Upload records from before sizes were recorded count as the current size.
+            self.files._update_entry(ASSET, lambda entry: entry['portrait']['uploaded'].pop('size'))
+            self.assertEqual(self.image()['status'], 'completed')
+
     def test_corrupt_metadata_is_not_overwritten(self):
         path = Path(self.app.config.CROP_METADATA_FILE)
         path.parent.mkdir(exist_ok=True, parents=True)
@@ -305,7 +356,7 @@ class CropRegressionTests(unittest.TestCase):
 
     def test_uploaded_single_orientation_is_completed_with_one_crop(self):
         self.save(False)
-        self.files.mark_uploaded(ASSET, 'portrait', 'p', PORTRAIT)
+        self.uploaded('portrait')
         image = self.image()
         self.assertEqual(image['status'], 'completed')
         self.assertEqual(image['crops'], {'portrait': PORTRAIT, 'landscape': None})
@@ -679,6 +730,45 @@ class CropRegressionTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 400)
                 self.assertIn(message, response.json['error'])
         self.assertEqual(self.app.immich_handler.output_album_id, 'output-album')
+
+    def test_sync_interval_is_validated_and_defaults_to_15_minutes(self):
+        self.keep_settings()
+        for value in (-1, 1441, '15', True, 1.5):
+            payload = self.settings_payload()
+            payload['sync'] = {'interval_minutes': value}
+            with self.subTest(value):
+                response = self.client.put('/settings', json=payload)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('Sync interval', response.json['error'])
+        response = self.client.put('/settings', json=self.settings_payload())
+        self.assertEqual(response.json['settings']['sync'], {'interval_minutes': 15})
+        payload = self.settings_payload()
+        payload['sync'] = {'interval_minutes': 0}
+        self.assertEqual(self.client.put('/settings', json=payload).json['settings']['sync'], {'interval_minutes': 0})
+
+    def test_scheduled_sync_follows_the_interval(self):
+        settings = self.app.config.settings
+        with patch.dict(settings['sync'], interval_minutes=15), \
+             patch.object(self.app.jobs, 'last_started', return_value=100.0):
+            self.assertFalse(self.app.sync_due(now=100 + 15 * 60 - 1))
+            self.assertTrue(self.app.sync_due(now=100 + 15 * 60))
+            with patch.object(self.app.config, 'is_configured', return_value=False):
+                self.assertFalse(self.app.sync_due(now=10 ** 6))
+        with patch.dict(settings['sync'], interval_minutes=0):
+            self.assertFalse(self.app.sync_due(now=10 ** 6))
+        with patch.dict(settings['sync'], interval_minutes=15), \
+             patch.object(self.app.jobs, 'last_started', return_value=None):
+            self.assertTrue(self.app.sync_due())
+
+    def test_jobs_endpoint_reports_the_last_finished_sync(self):
+        with patch.object(self.app.immich_handler, 'sync_input_images', return_value=[]):
+            job = self.run_job('/sync')
+        status = self.client.get('/jobs').json
+        self.assertEqual((status['running'], status['last_sync']), (None, job['id']))
+        with patch.object(self.app.immich_handler, 'sync_input_images', side_effect=RuntimeError('offline')):
+            self.run_job('/sync')
+        # A failed sync changed nothing, so the page has nothing to refresh.
+        self.assertEqual(self.client.get('/jobs').json['last_sync'], job['id'])
 
     def test_settings_wait_for_running_job(self):
         import threading

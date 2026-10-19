@@ -1,10 +1,11 @@
 """Persistent crop/upload state and the disposable source-image cache.
 
 crops/metadata.json holds, per asset and orientation:
-    {"crop": {x, y, width, height}, "uploaded": {"asset_id", "crop", "at"}}
+    {"crop": {x, y, width, height}, "uploaded": {"asset_id", "crop", "size", "at"}}
 "crop" is the saved selection; "uploaded" records what was last sent to Immich.
-An orientation is up to date when both crops are equal, so re-cropping after an
-upload makes the image pending again without a separate progress store.
+An orientation is up to date when both crops are equal and it was rendered at
+the current output size, so re-cropping after an upload (or changing the size)
+makes the image pending again without a separate progress store.
 """
 import os
 import json
@@ -12,7 +13,7 @@ import logging
 import tempfile
 import threading
 from datetime import datetime, timezone
-from config import INPUT_FOLDER, CROP_METADATA_FILE, LEGACY_PROGRESS_FILE, THUMBNAIL_FOLDER, ORIENTATIONS
+from config import INPUT_FOLDER, CROP_METADATA_FILE, LEGACY_PROGRESS_FILE, THUMBNAIL_FOLDER, ORIENTATIONS, SIZES
 
 METADATA_DIR = os.path.join(INPUT_FOLDER, ".metadata")
 
@@ -94,10 +95,21 @@ def delete_crops(asset_id, orientation=None):
     _update_entry(asset_id, change)
 
 
-def mark_uploaded(asset_id, orientation, remote_id, crop):
-    """Record which selection the Immich copy was rendered from."""
-    record = {"asset_id": remote_id, "crop": crop, "at": datetime.now(timezone.utc).isoformat()}
+def mark_uploaded(asset_id, orientation, remote_id, crop, size):
+    """Record which selection and output size the Immich copy was rendered from."""
+    record = {"asset_id": remote_id, "crop": crop, "size": list(size), "at": datetime.now(timezone.utc).isoformat()}
     _update_entry(asset_id, lambda entry: entry.setdefault(orientation, {}).update(uploaded=record))
+
+
+def needs_upload(entry, orientation):
+    """True when a saved selection isn't in Immich as it would render now."""
+    crop = saved_crop(entry, orientation)
+    if not crop:
+        return False
+    uploaded = entry[orientation].get("uploaded") or {}
+    size = list(SIZES[orientation])
+    # Records from before sizes were tracked count as the current size.
+    return uploaded.get("crop") != crop or uploaded.get("size", size) != size
 
 
 def image_status(entry):
@@ -105,7 +117,7 @@ def image_status(entry):
     saved = [o for o in ORIENTATIONS if saved_crop(entry, o)]
     if not saved:
         return "unprocessed"
-    if all((entry[o].get("uploaded") or {}).get("crop") == entry[o]["crop"] for o in saved):
+    if not any(needs_upload(entry, o) for o in saved):
         return "completed"
     return "both" if len(saved) == 2 else saved[0]
 

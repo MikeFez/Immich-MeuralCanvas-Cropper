@@ -11,6 +11,7 @@ const ELEMENT_IDS = {
     currentImage: 'current-image',
     cropRectangle: 'crop-rectangle',
     cropOverlay: 'crop-overlay',
+    cropResolution: 'crop-resolution',
     editorView: 'editor-view',
     editorContainer: 'editor-container',
     noImageView: 'no-image-view',
@@ -82,6 +83,7 @@ function updateStage() {
     show(E.btnCropEl, !review);
     show(E.btnSkipEl, !review);
     show(E.btnSaveEl, review);
+    E.cropResolutionEl.hidden = review;
 
     if (review) {
         E.stageNameEl.innerHTML = '<strong>Review</strong> Crops';

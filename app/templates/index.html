@@ -29,7 +29,7 @@
                 <div class="sidebar">
                     <div class="filter-container">
                       <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="show-unprocessed-only">
+                        <input class="form-check-input" type="checkbox" id="show-unprocessed-only" checked>
                         <label class="form-check-label" for="show-unprocessed-only">
                           Show unprocessed images only
                         </label>
@@ -87,6 +87,7 @@
                                 <div class="crop-handle bottom-right"></div>
                             </div>
                         </div>
+                        <div id="crop-resolution" class="crop-resolution" hidden></div>
 
                         <div id="preview-view" style="display: none;">
                             <div class="frame-preview-container">
@@ -252,6 +253,14 @@
                             <select id="settings-output-album" name="output_album_id" class="form-select"></select>
                             <div class="form-text">Where finished crops are uploaded</div>
                         </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="settings-sync-interval">Sync every</label>
+                            <div class="input-group">
+                                <input id="settings-sync-interval" name="sync_interval" class="form-control" type="number" min="0" max="1440">
+                                <span class="input-group-text">minutes</span>
+                            </div>
+                            <div class="form-text">Checks the input album for new and changed photos; 0 turns it off</div>
+                        </div>
                     </div>
                 </section>
 
@@ -284,7 +293,7 @@
                         </div>
                         <div class="col-12 form-text">
                             Use your Meural's screen resolution. Crops saved at other proportions are padded
-                            with black bars until you re-crop them.
+                            with black bars until you re-crop them, and every crop needs uploading again.
                         </div>
                     </div>
                 </section>

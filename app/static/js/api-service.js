@@ -4,8 +4,10 @@
  * Handles all backend API calls
  */
 
-// Sync state tracking
+// Jobs this page started; watchBackgroundJobs notices the others.
 let syncInProgress = false;
+let uploadInProgress = false;
+let lastSyncSeen;  // ID of the sync the image list reflects
 
 /**
  * Start a background job ('sync' or 'upload-all') and resolve with its result.
@@ -45,6 +47,22 @@ function refreshManageModal() {
 }
 
 /**
+ * Reload the image list after a sync or upload. The open image stays open unless
+ * it left the album (back to the landing page) or changed in Immich (reloaded).
+ */
+async function refreshImages() {
+    const current = window.APP_STATE.currentImage;
+    const images = await (await fetch('/images')).json();
+    window.APP_STATE.imageList = images;
+    const updated = current && images.find(image => image.asset_id === current.asset_id);
+    window.APP_STATE.currentImage = updated || null;
+    renderImageList();
+    if (!updated) showView('no-image-view');
+    else if (current.source_version !== updated.source_version) selectImage(updated.asset_id);
+    refreshManageModal();
+}
+
+/**
  * Sync images from Immich input album
  */
 async function syncWithImmich() {
@@ -52,9 +70,7 @@ async function syncWithImmich() {
         return { success: false, message: 'Another operation is in progress' };
     }
     const button = window.ELEMENTS.btnImmichSyncEl;
-    const current = window.APP_STATE.currentImage;
-    let changedImage = null;
-    let synced = false;
+    let result;
     syncInProgress = window.APP_STATE.syncing = true;
     showJobRunning(true);
     if (button) {
@@ -62,16 +78,7 @@ async function syncWithImmich() {
         button.textContent = 'Syncing…';
     }
     try {
-        const result = await runJob('sync', job => { if (button) button.textContent = progressLabel('Syncing', job); });
-        const images = await (await fetch('/images')).json();
-        window.APP_STATE.imageList = images;
-        if (current) {
-            const updated = images.find(image => image.asset_id === current.asset_id);
-            window.APP_STATE.currentImage = updated || null;
-            if (updated && current.source_version !== updated.source_version) changedImage = current.asset_id;
-        }
-        synced = true;
-        return result;
+        result = await runJob('sync', job => { if (button) button.textContent = progressLabel('Syncing', job); });
     } catch (error) {
         showToast('Error syncing with Immich: ' + error.message, 'error');
         throw error;
@@ -82,12 +89,28 @@ async function syncWithImmich() {
             button.disabled = false;
             button.innerHTML = '<i class="fas fa-sync-alt"></i> Sync';
         }
-        if (synced) {
-            renderImageList();
-            if (!window.APP_STATE.currentImage) showView('no-image-view');
-            else if (changedImage) selectImage(changedImage);
-            refreshManageModal();
+    }
+    // Rendering and selecting are refused while syncing, so refresh afterwards.
+    await refreshImages();
+    return result;
+}
+
+/**
+ * Notice jobs this page didn't start: the startup sync and scheduled syncs.
+ * The image list is refreshed whenever a newer sync has finished.
+ */
+async function watchBackgroundJobs() {
+    try {
+        const data = await (await fetch('/jobs')).json();
+        showJobRunning(!!data.running || syncInProgress || uploadInProgress);
+        if (lastSyncSeen === undefined) {
+            lastSyncSeen = data.last_sync;
+        } else if (data.last_sync !== lastSyncSeen && !window.APP_STATE.syncing && !window.APP_STATE.cropBusy) {
+            lastSyncSeen = data.last_sync;
+            await refreshImages();
         }
+    } catch (error) {
+        console.warn('Could not check background jobs:', error);
     }
 }
 
@@ -100,15 +123,12 @@ async function uploadAllToImmich() {
     }
     const button = window.ELEMENTS.btnImmichUploadEl;
     const label = button?.innerHTML;
+    uploadInProgress = true;
     showJobRunning(true);
     try {
         const data = await runJob('upload-all', job => { if (button) button.textContent = progressLabel('Uploading', job); });
         // Refresh even on partial failure: some images may now be completed.
-        if (data.uploaded_assets?.length) {
-            window.APP_STATE.imageList = await fetch('/images').then(response => response.json());
-            renderImageList();
-            refreshManageModal();
-        }
+        if (data.uploaded_assets?.length) await refreshImages();
         if (!data.success) {
             const uploaded = data.uploaded_assets?.length || 0;
             const failed = data.failed_assets?.length || 0;
@@ -116,13 +136,16 @@ async function uploadAllToImmich() {
                 ? `${uploaded} crop(s) uploaded, ${failed} image(s) failed. ${data.error || ''}`.trim()
                 : data.error || 'Unknown error');
         }
-        showToast(`Uploaded ${data.uploaded_assets?.length || 0} crops to Immich`, 'success');
+        const count = data.uploaded_assets?.length || 0;
+        showToast(count ? `Uploaded ${count} new or changed crop${count === 1 ? '' : 's'} to Immich`
+            : 'Every crop is already in Immich', 'success');
         return data.uploaded_assets;
     } catch (error) {
         console.error('Error uploading to Immich:', error);
         showToast('Error uploading to Immich: ' + error.message, 'error');
         throw error;
     } finally {
+        uploadInProgress = false;
         showJobRunning(false);
         if (button) button.innerHTML = label;
     }

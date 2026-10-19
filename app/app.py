@@ -3,6 +3,8 @@ import os
 import re
 import logging
 import io
+import threading
+import time
 import requests
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, send_from_directory, send_file, abort
@@ -18,6 +20,7 @@ from utils.file_handler import (
     save_crop,
     delete_crops,
     mark_uploaded,
+    needs_upload,
     migrate_legacy_state,
     read_all_crop_metadata,
     saved_crop,
@@ -113,6 +116,24 @@ def initial_sync():
     if config.is_configured():
         return jobs.start("sync", run_sync)
     return None, False
+
+
+def sync_due(now=None):
+    """True when sync.interval_minutes have passed since the last sync started (0 = never)."""
+    minutes = config.settings["sync"]["interval_minutes"]
+    last = jobs.last_started("sync")
+    now = time.monotonic() if now is None else now
+    return bool(minutes) and config.is_configured() and (last is None or now - last >= minutes * 60)
+
+
+def schedule_syncs(tick=30):
+    """Sync the input album on the configured interval, skipping while any job runs."""
+    def loop():
+        while True:
+            time.sleep(tick)
+            if sync_due() and not jobs.running():
+                jobs.start("sync", run_sync)
+    threading.Thread(target=loop, name="sync-schedule", daemon=True).start()
 
 
 def job_response(job, started):
@@ -253,6 +274,12 @@ def sync_with_immich():
     return job_response(*jobs.start("sync", run_sync))
 
 
+@app.route("/jobs")
+def get_jobs():
+    """What the UI polls to notice syncs it didn't start (scheduled or at startup)."""
+    return jsonify({"success": True, "running": jobs.running(), "last_sync": jobs.last_finished("sync")})
+
+
 @app.route("/jobs/<int:job_id>")
 def get_job(job_id):
     job = jobs.get(job_id)
@@ -268,26 +295,33 @@ class UploadFailure(RuntimeError):
 
 
 def upload_saved_crops(asset_id, orientations=None, album_assets=None):
-    """Render and upload one image's selected crops, recording each success."""
+    """Render and upload one image's crops, recording each success.
+
+    By default only crops that aren't in Immich as they would render now are
+    sent; naming orientations uploads those even if they are up to date.
+    """
     with image_lock(asset_id):
         entry = read_all_crop_metadata().get(asset_id, {})
         intended = [o for o in ORIENTATIONS if saved_crop(entry, o)]
-        selected = intended if orientations is None else orientations
-        if not selected or any(o not in intended for o in selected):
+        if orientations is None:
+            orientations = [o for o in intended if needs_upload(entry, o)]
+            if intended and not orientations:
+                return []
+        if not orientations or any(o not in intended for o in orientations):
             raise ValueError('No saved crops to upload')
         uploaded = []
         try:
             path = source_path(asset_id)
             if album_assets is None:
                 album_assets = immich_handler.get_album_assets(immich_handler.output_album_id)
-            for orientation in selected:
-                crop = entry[orientation]["crop"]
+            for orientation in orientations:
+                crop, size = entry[orientation]["crop"], SIZES[orientation]
                 filename = f'{asset_id}_{orientation}.jpg'
                 remote_id = immich_handler.upload_asset(
-                    render_image(path, crop, SIZES[orientation]), filename,
+                    render_image(path, crop, size), filename,
                     immich_handler.output_album_id, replaces=find_processed_asset(album_assets, filename),
                 )
-                mark_uploaded(asset_id, orientation, remote_id, crop)
+                mark_uploaded(asset_id, orientation, remote_id, crop, size)
                 uploaded.append({'filename': filename, 'asset_id': remote_id,
                                  'original_asset_id': asset_id, 'orientation': orientation})
             return uploaded
@@ -298,7 +332,7 @@ def upload_saved_crops(asset_id, orientations=None, album_assets=None):
 @app.route("/complete", methods=["POST"])
 @asset_route(lock=True)
 def complete_image(asset_id):
-    """Complete only after all saved orientations upload successfully."""
+    """Complete only after every saved orientation is in Immich (unchanged ones aren't resent)."""
     try:
         return image_response(asset_id, uploaded_files=upload_saved_crops(asset_id))
     except ValueError as e:
@@ -322,14 +356,16 @@ def upload_single_crop(asset_id):
 
 
 def run_upload_all(progress):
-    """Upload every cached image with saved crops, one at a time, reporting partial failures."""
+    """Upload every new or changed crop, one image at a time, reporting partial failures."""
     uploaded, failed = [], []
     # Saved coordinates survive removal from the source album; skip those images.
     pending = [asset_id for asset_id, entry in read_all_crop_metadata().items()
-               if get_filename_from_asset_id(asset_id) and any(saved_crop(entry, o) for o in ORIENTATIONS)]
+               if get_filename_from_asset_id(asset_id) and any(needs_upload(entry, o) for o in ORIENTATIONS)]
+    progress(0, len(pending))
+    if not pending:
+        return {'success': True, 'uploaded_assets': [], 'failed_assets': [], 'error': None}
     # One album fetch for the whole batch; each crop only matches its own entry.
     album_assets = immich_handler.get_album_assets(immich_handler.output_album_id)
-    progress(0, len(pending))
     for done, asset_id in enumerate(pending, 1):
         try:
             uploaded.extend(upload_saved_crops(asset_id, album_assets=album_assets))
@@ -396,9 +432,11 @@ if __name__ == "__main__":
         # Development server with auto-reload; sync only in the reloaded child process.
         if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
             initial_sync()
+            schedule_syncs()
         app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
     else:
         initial_sync()
+        schedule_syncs()
         # Production server. Keep a single process: per-image locks and jobs live in memory.
         from waitress import serve
         serve(app, host="0.0.0.0", port=5000, threads=8)

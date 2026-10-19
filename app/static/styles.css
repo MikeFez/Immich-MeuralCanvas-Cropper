@@ -621,6 +621,18 @@ body {
     flex-direction: column;
 }
 
+.crop-resolution {
+    text-align: center;
+    font-size: 0.85rem;
+    color: #6c757d;
+    margin-top: 4px;
+}
+
+.crop-resolution.low {
+    color: #9a6700;
+    font-weight: 600;
+}
+
 .manage-toolbar {
     display: flex;
     flex-wrap: wrap;

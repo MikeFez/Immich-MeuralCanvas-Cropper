@@ -30,9 +30,11 @@ DEFAULT_SETTINGS = {
     "dimensions": {"portrait_size": [1080, 1920], "landscape_size": [1920, 1080]},  # width x height
     "immich": {"url": "", "api_key": "", "input_album_id": "", "output_album_id": ""},
     "meural": {"devices": []},
+    "sync": {"interval_minutes": 15},  # 0 turns scheduled syncs off
 }
 ORIENTATIONS = ("portrait", "landscape")
 MAX_SIZE = 10000
+MAX_SYNC_INTERVAL = 1440  # minutes
 MEURAL_HOST = re.compile(r"[A-Za-z0-9.-]+(:\d{1,5})?")
 
 # The settings in effect. Both are updated in place by apply_settings, so
@@ -132,7 +134,12 @@ def validate_settings(data):
             raise ValueError(f"{name}: preview duration must be 1-3600 seconds")
         devices.append({"name": name, "ip": ip, "preview_duration": duration})
 
-    return {"dimensions": sizes, "immich": {**login, **albums}, "meural": {"devices": devices}}
+    interval = (data.get("sync") or {}).get("interval_minutes", DEFAULT_SETTINGS["sync"]["interval_minutes"])
+    if not isinstance(interval, int) or isinstance(interval, bool) or not 0 <= interval <= MAX_SYNC_INTERVAL:
+        raise ValueError(f"Sync interval must be 0-{MAX_SYNC_INTERVAL} minutes (0 turns it off)")
+
+    return {"dimensions": sizes, "immich": {**login, **albums}, "meural": {"devices": devices},
+            "sync": {"interval_minutes": interval}}
 
 
 def save_settings(new):

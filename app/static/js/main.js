@@ -114,6 +114,10 @@ async function initializeApp() {
 
     // 4. Load initial images - WITHOUT sync
     try {
+        // Note which sync the list reflects, so a startup or scheduled sync refreshes it.
+        await watchBackgroundJobs();
+        setInterval(watchBackgroundJobs, 15000);
+
         console.log('Loading initial images without sync...');
 
         // Just load the image list directly

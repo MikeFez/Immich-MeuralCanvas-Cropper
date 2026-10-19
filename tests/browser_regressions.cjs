@@ -53,7 +53,9 @@ const second = '22222222-2222-4222-8222-222222222222';
             body: JSON.stringify({ success: false, error: 'simulated sync failure' }) }));
         // The library panel holds only the filter, the count and the images; Sync lives in Manage.
         assert.equal(await page.locator('.sidebar button').count(), 0);
-        assert.equal(await page.locator('.filter-container #image-count').innerText(), '2');
+        // Only unprocessed images are listed by default; the count shows listed/total.
+        assert.equal(await page.locator('#show-unprocessed-only').isChecked(), true);
+        assert.equal(await page.locator('.filter-container #image-count').innerText(), '2/2');
         await page.locator('#btn-manage').click();
         await page.locator('#btn-immich-sync').click();
         await page.waitForFunction(() => !window.APP_STATE.syncing);
@@ -65,9 +67,20 @@ const second = '22222222-2222-4222-8222-222222222222';
         assert.equal(await page.locator('#btn-manage i').getAttribute('class'), 'fas fa-list');
         await page.keyboard.press('Escape');
         console.log('PASS: Sync (in Manage) reports failures and a retry refreshes the image list');
+        // A sync the page didn't start (scheduled or at startup) refreshes the list once it finishes.
+        await page.request.post(`${baseURL}/sync`);
+        await page.waitForFunction(async () => !(await (await fetch('/jobs')).json()).running);
+        const refreshed = page.waitForRequest(request => new URL(request.url()).pathname === '/images');
+        await page.evaluate(() => watchBackgroundJobs());
+        await refreshed;
+        console.log('PASS: a background sync refreshes the open page');
         await page.locator(`[data-identifier="${asset}"]`).click();
         await page.waitForFunction(() => window._cropRectangleInitialized);
         assert.equal(await page.evaluate(() => window.APP_STATE.currentStage), 1);
+        // The 160x90 fixture can't fill a 90x160 portrait frame, so the crop is enlarged.
+        assert.ok(await page.locator('#crop-resolution').isVisible());
+        assert.match(await page.locator('#crop-resolution').innerText(), /^Low resolution: \d+×\d+ px of the original will be enlarged [\d.]+× to 90×160/);
+        console.log('PASS: the crop step warns when the output enlarges the crop');
 
         let release;
         const gate = new Promise(resolve => { release = resolve; });
@@ -88,6 +101,7 @@ const second = '22222222-2222-4222-8222-222222222222';
 
         await page.locator('#btn-skip').click();
         await page.waitForFunction(() => window.APP_STATE.currentStage === 3 && !window.APP_STATE.cropBusy);
+        assert.equal(await page.locator('#crop-resolution').isVisible(), false);
         await page.route('**/complete', route => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'simulated upload failure' }) }));
         await page.locator('#btn-save').click();
         await page.waitForFunction(() => !window.APP_STATE.cropBusy);
@@ -106,6 +120,24 @@ const second = '22222222-2222-4222-8222-222222222222';
         assert.equal(await completed.locator('.fa-mobile-alt').getAttribute('class'), 'fas fa-mobile-alt text-success');
         assert.equal(await completed.locator('.fa-desktop').getAttribute('class'), 'fas fa-desktop text-secondary');
         console.log('PASS: uploaded portrait-only image has correct icons after reload');
+
+        // The filter hides it, says so when nothing is left, and remembers being turned off.
+        assert.ok(await completed.evaluate(item => item.classList.contains('filtered')));
+        assert.equal(await completed.isVisible(), false);
+        assert.equal(await page.locator('#image-count').innerText(), '1/2');
+        await page.evaluate(() => {
+            document.querySelectorAll('.image-grid-item').forEach(item => { item.dataset.status = 'completed'; });
+            applyUnprocessedFilter();
+        });
+        assert.ok(await page.locator('.filter-empty').isVisible());
+        await page.evaluate(() => renderImageList());
+        assert.equal(await page.locator('.filter-empty').count(), 0);
+        await page.locator('#show-unprocessed-only').uncheck();
+        await page.reload();
+        await page.waitForFunction(() => window.APP_STATE?.initialized);
+        assert.equal(await page.locator('#show-unprocessed-only').isChecked(), false);
+        assert.equal(await page.locator('#image-count').innerText(), '2');
+        console.log('PASS: the unprocessed filter is on by default and remembers being turned off');
 
         const original = await savedCrop(page, 'portrait');
         await page.locator('#btn-manage').click();

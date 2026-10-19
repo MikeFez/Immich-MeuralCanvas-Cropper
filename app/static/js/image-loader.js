@@ -62,56 +62,46 @@ function renderImageList() {
     setupUnprocessedFilter();
 }
 
+const FILTER_KEY = 'showUnprocessedOnly';
+
 /**
  * Apply unprocessed images filter
  */
 function applyUnprocessedFilter() {
-    const filterSwitch = window.ELEMENTS.unprocessedFilterEl;
-    const showOnlyUnprocessed = filterSwitch && filterSwitch.checked;
+    const showOnlyUnprocessed = window.ELEMENTS.unprocessedFilterEl.checked;
+    const items = document.querySelectorAll('.image-grid-item');
+    items.forEach(item => item.classList.toggle('filtered',
+        showOnlyUnprocessed && item.dataset.status === 'completed'));
 
-    // Apply filter to all image grid items
-    document.querySelectorAll('.image-grid-item').forEach(item => {
-        const status = item.getAttribute('data-status');
-
-        if (showOnlyUnprocessed) {
-            // Only show unprocessed images
-            if (status !== 'completed') {
-                item.classList.remove('filtered');
-            } else {
-                item.classList.add('filtered');
-            }
-        } else {
-            // Show all images
-            item.classList.remove('filtered');
-        }
-    });
-
-    // Update image count to show filtered count - no more division by 2
     const visibleCount = document.querySelectorAll('.image-grid-item:not(.filtered)').length;
-    const totalCount = document.querySelectorAll('.image-grid-item').length;
-    const imageCountEl = window.ELEMENTS.imageCountEl;
-    if (imageCountEl) {
-        if (showOnlyUnprocessed) {
-            imageCountEl.textContent = `${visibleCount}/${totalCount}`;
-        } else {
-            imageCountEl.textContent = totalCount;
-        }
+    window.ELEMENTS.imageCountEl.textContent = showOnlyUnprocessed ? `${visibleCount}/${items.length}` : items.length;
+
+    // Say why the grid is empty instead of showing nothing.
+    const grid = window.ELEMENTS.imageGridEl;
+    grid.querySelector('.filter-empty')?.remove();
+    if (items.length && !visibleCount) {
+        grid.append(makeElement('div', 'filter-empty alert alert-success m-2',
+            'Every image is processed. Turn off the filter to see them.'));
     }
 }
 
 /**
- * Set up unprocessed filter handling
+ * Set up unprocessed filter handling. It's on by default; the choice is remembered per browser.
  */
 function setupUnprocessedFilter() {
     const filterSwitch = window.ELEMENTS.unprocessedFilterEl;
-    if (!filterSwitch) return;
-
     if (!filterSwitch._filterHandler) {
-        filterSwitch.addEventListener('change', applyUnprocessedFilter);
+        try {
+            const saved = localStorage.getItem(FILTER_KEY);
+            if (saved !== null) filterSwitch.checked = saved === 'true';
+        } catch { /* storage unavailable: keep the default */ }
+        filterSwitch.addEventListener('change', () => {
+            try { localStorage.setItem(FILTER_KEY, filterSwitch.checked); } catch { /* not remembered */ }
+            applyUnprocessedFilter();
+        });
         filterSwitch._filterHandler = true;
     }
 
-    // Initial filter application
     applyUnprocessedFilter();
 }
 

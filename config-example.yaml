@@ -19,3 +19,7 @@ meural:
     - name: "Sitting Room"
       ip: "192.168.1.135"
       preview_duration: 10  # seconds
+
+# How often to sync the input album, in minutes (0 = off)
+sync:
+  interval_minutes: 15
