@@ -2,6 +2,7 @@ import os
 import json
 import tempfile
 import requests
+from utils.http_client import HttpClient
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional
 import logging
@@ -19,6 +20,7 @@ class ImmichHandler:
 
     def configure(self, settings):
         """Point at a server; settings is the immich section of the config (fields may be blank)."""
+        self.http = HttpClient()
         self.base_url = (settings.get("url") or "").rstrip("/")
         self.api_key = settings.get("api_key") or ""
         self.input_album_id = settings.get("input_album_id") or ""
@@ -34,7 +36,7 @@ class ImmichHandler:
         logging.info(f"Making Immich API request: {method} {url}")
         kwargs.setdefault("timeout", (5, 60))
         try:
-            response = requests.request(method, url, headers=self.headers, **kwargs)
+            response = self.http.session().request(method, url, headers=self.headers, **kwargs)
 
             # Log response content for debugging when there's an error
             if not response.ok:
@@ -108,7 +110,7 @@ class ImmichHandler:
                 os.makedirs(save_dir, exist_ok=True)
                 with tempfile.NamedTemporaryFile(dir=save_dir, delete=False) as f:
                     temporary = f.name
-                    with requests.get(f'{self.base_url}/api/assets/{asset_id}/original',
+                    with self.http.session().get(f'{self.base_url}/api/assets/{asset_id}/original',
                                       headers=self.headers, stream=True, timeout=(5, 60)) as response:
                         response.raise_for_status()
                         for chunk in response.iter_content(chunk_size=65536):
@@ -122,9 +124,9 @@ class ImmichHandler:
                     write_image_atomic(path, render_image(temporary))
                 self._store_asset_metadata(asset_id, info, path)
                 return True, path
-        except Exception:
+        except Exception as error:
             logging.exception('Failed to download asset %s', asset_id)
-            return False, ''
+            return False, str(error)
         finally:
             if temporary and os.path.exists(temporary):
                 os.remove(temporary)
@@ -142,37 +144,45 @@ class ImmichHandler:
         write_json_atomic(path, metadata)
 
     def upload_asset(self, content: bytes, filename: str, album_id: str,
-                     replaces: Optional[str] = None) -> str:
-        """Upload JPEG bytes into an album and return the Immich asset ID.
+                     replaces: Optional[str] = None, resume=None, checkpoint=None) -> str:
+        """Upload, attach and retire the old copy, checkpointing each remote step.
 
-        Immich v3 removed in-place replacement, so a new version is uploaded
-        and the previous one (`replaces`) is moved to the Immich trash. Immich
-        deduplicates identical bytes by returning the existing ID; that copy
-        is kept.
+        A retry uses the saved remote ID instead of sending the JPEG again.
+        Mutations remain safe to repeat if a crash precedes the next checkpoint.
         """
-        now = datetime.now(timezone.utc).isoformat()
-        data = {
-            "deviceAssetId": os.path.splitext(filename)[0],
-            "deviceId": "meural-cropper",
-            "fileCreatedAt": now,
-            "fileModifiedAt": now,
-            "isFavorite": "false",
-        }
-        response = self._make_request(
-            "POST", "/assets", files={"assetData": (filename, content, "image/jpeg")}, data=data
-        )
-        asset_id = response.get("id") if isinstance(response, dict) else None
-        if not asset_id:
-            raise RuntimeError(f"Immich returned no asset ID for {filename}")
-        if not self.add_assets_to_album(album_id, [asset_id]):
-            raise RuntimeError("Upload succeeded but adding the asset to the destination album failed")
-        if replaces and replaces != asset_id:
+        state = dict(resume or {})
+        def save():
+            if checkpoint:
+                checkpoint(dict(state))
+
+        if not state.get('asset_id'):
+            now = datetime.now(timezone.utc).isoformat()
+            response = self._make_request(
+                'POST', '/assets', files={'assetData': (filename, content, 'image/jpeg')},
+                data={'deviceAssetId': os.path.splitext(filename)[0], 'deviceId': 'meural-cropper',
+                      'fileCreatedAt': now, 'fileModifiedAt': now, 'isFavorite': 'false'},
+            )
+            remote_id = response.get('id') if isinstance(response, dict) else None
+            if not remote_id:
+                raise RuntimeError(f'Immich returned no asset ID for {filename}')
+            state.update(asset_id=remote_id, replaces=replaces, attached=False, retired=False)
+            save()
+        asset_id = state['asset_id']
+        if not state.get('attached'):
+            if not self.add_assets_to_album(album_id, [asset_id]):
+                raise RuntimeError('Upload succeeded but adding the asset to the destination album failed')
+            state['attached'] = True
+            save()
+        previous = state.get('replaces')
+        if previous and previous != asset_id and not state.get('retired'):
             try:
-                self.trash_asset(replaces)
+                self.trash_asset(previous)
             except Exception as e:
                 raise RuntimeError(
-                    f"Uploaded {filename} but could not remove the previous version {replaces}: {e}"
+                    f'Uploaded {filename} but could not remove the previous version {previous}: {e}'
                 ) from e
+            state['retired'] = True
+            save()
         return asset_id
 
     def trash_asset(self, asset_id: str):
@@ -194,7 +204,7 @@ class ImmichHandler:
             logging.error(f"Failed to add assets to album: {e}")
             return False
 
-    def sync_input_images(self, input_folder, progress=None, workers=4):
+    def sync_input_images(self, input_folder, progress=None, workers=4, asset_ids=None):
         """Repair the cache and reconcile it with a successfully fetched source album.
 
         Assets are checked and downloaded in parallel; progress(done, total) is
@@ -204,17 +214,31 @@ class ImmichHandler:
         if any(not isinstance(asset, dict) or not asset.get('id') for asset in assets):
             raise ValueError('Invalid source album asset')
         assets = [asset for asset in assets if asset.get('type', 'IMAGE') == 'IMAGE']
+        def cancelled():
+            return bool(progress and hasattr(progress, 'cancelled') and progress.cancelled())
+
+        if cancelled():
+            return []
         active_ids = {asset['id'] for asset in assets}
         metadata_dir = os.path.join(input_folder, '.metadata')
         os.makedirs(metadata_dir, exist_ok=True)
         for name in os.listdir(metadata_dir):
+            if cancelled():
+                return []
             if name.endswith('.json') and name[:-5] not in active_ids:
                 remove_cached_image(name[:-5])
+
+        if asset_ids is not None:
+            assets = [asset for asset in assets if asset['id'] in asset_ids]
 
         def ensure_cached(asset):
             """Return the cache entry for one asset, downloading it if missing or stale; None on failure."""
             asset_id = asset['id']
+            if cancelled():
+                return None
             with image_lock(asset_id):
+                if cancelled():
+                    return None
                 cached = None
                 try:
                     with open(os.path.join(metadata_dir, f'{asset_id}.json')) as f:
@@ -230,25 +254,42 @@ class ImmichHandler:
                 if cached is None:
                     success, path = self.download_asset(asset_id, input_folder)
                     if not success:
-                        return None
+                        raise RuntimeError(path or 'Could not download source image')
                     with open(os.path.join(metadata_dir, f'{asset_id}.json')) as f:
                         cached = json.load(f)
                 return {'asset_id': asset_id, 'file_path': path,
                         'original_filename': cached.get('original_filename', '')}
 
-        if progress:
+        if progress and hasattr(progress, 'plan'):
+            progress.plan([asset['id'] for asset in assets])
+        elif progress:
             progress(0, len(assets))
+        available, failures = [], []
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(ensure_cached, asset) for asset in assets]
-            for done, _ in enumerate(as_completed(futures), 1):
-                if progress:
+            futures = {pool.submit(ensure_cached, asset): asset['id'] for asset in assets}
+            for done, future in enumerate(as_completed(futures), 1):
+                asset_id = futures[future]
+                error = None
+                try:
+                    entry = future.result()
+                    if entry:
+                        available.append(entry)
+                    elif cancelled():
+                        continue
+                    else:
+                        error = 'Could not download source image'
+                except Exception as exception:
+                    error = str(exception)
+                if error:
+                    failures.append(asset_id)
+                if progress and hasattr(progress, 'complete'):
+                    progress.complete(asset_id, error)
+                elif progress:
                     progress(done, len(assets))
-        results = [future.result() for future in futures]
-        available = [entry for entry in results if entry]
-        failures = [asset['id'] for asset, entry in zip(assets, results) if not entry]
-        if failures:
+        if failures and not cancelled():
             raise RuntimeError(f'Could not download {len(failures)} source image(s); retry Sync')
-        return available
+        by_id = {entry['asset_id']: entry for entry in available}
+        return [by_id[asset['id']] for asset in assets if asset['id'] in by_id]
 
 
     def remove_from_input_album(self, asset_id: str) -> Dict[str, Any]:

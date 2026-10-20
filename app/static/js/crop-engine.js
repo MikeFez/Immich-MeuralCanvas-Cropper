@@ -1,3 +1,11 @@
+/** Upright original dimensions, independent of the smaller editor JPEG. */
+function sourceImageSize() {
+    return window.APP_STATE.currentImage?.source_size || {
+        width: window.ELEMENTS.currentImageEl.naturalWidth,
+        height: window.ELEMENTS.currentImageEl.naturalHeight
+    };
+}
+
 /**
  * crop-engine.js - Core cropping functionality
  *
@@ -18,9 +26,10 @@ function forceImageFit() {
     const width = container.clientWidth - 40;
     const height = container.clientHeight - 40;
     if (width <= 0 || height <= 0) return;
-    const scale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
-    image.style.width = image.naturalWidth * scale + 'px';
-    image.style.height = image.naturalHeight * scale + 'px';
+    const original = sourceImageSize();
+    const scale = Math.min(width / original.width, height / original.height);
+    image.style.width = original.width * scale + 'px';
+    image.style.height = original.height * scale + 'px';
     const bounds = image.getBoundingClientRect();
     const parent = container.getBoundingClientRect();
     Object.assign(container.dataset, {
@@ -47,7 +56,7 @@ function initCropRectangle(aspectRatio) {
     let height = width / aspectRatio;
     let x = (bounds.width - width) / 2, y = (bounds.height - height) / 2;
     if (saved?.width > 0 && saved?.height > 0) {
-        const scaleX = bounds.width / image.naturalWidth, scaleY = bounds.height / image.naturalHeight;
+        const scaleX = bounds.width / sourceImageSize().width, scaleY = bounds.height / sourceImageSize().height;
         width = Math.min(bounds.width, saved.width * scaleX);
         height = Math.min(bounds.height, saved.height * scaleY);
         x = Math.max(0, Math.min(saved.x * scaleX, bounds.width - width));
@@ -307,16 +316,17 @@ function updateCropValues() {
     const bounds = img.getBoundingClientRect();
     const parent = container.getBoundingClientRect();
     if (bounds.width <= 0 || bounds.height <= 0) return;
-    const scaleX = img.naturalWidth / bounds.width;
-    const scaleY = img.naturalHeight / bounds.height;
-    const x = Math.max(0, Math.min(img.naturalWidth - 1,
+    const original = sourceImageSize();
+    const scaleX = original.width / bounds.width;
+    const scaleY = original.height / bounds.height;
+    const x = Math.max(0, Math.min(original.width - 1,
         ((parseFloat(rectangle.style.left) || 0) - (bounds.left - parent.left)) * scaleX));
-    const y = Math.max(0, Math.min(img.naturalHeight - 1,
+    const y = Math.max(0, Math.min(original.height - 1,
         ((parseFloat(rectangle.style.top) || 0) - (bounds.top - parent.top)) * scaleY));
     const crop = {
         x, y,
-        width: Math.min((parseFloat(rectangle.style.width) || 0) * scaleX, img.naturalWidth - x),
-        height: Math.min((parseFloat(rectangle.style.height) || 0) * scaleY, img.naturalHeight - y)
+        width: Math.min((parseFloat(rectangle.style.width) || 0) * scaleX, original.width - x),
+        height: Math.min((parseFloat(rectangle.style.height) || 0) * scaleY, original.height - y)
     };
     const stage = window.APP_STATE.currentStage;
     if (stage === 1) window.APP_STATE.portraitCrop = crop;

@@ -20,6 +20,7 @@ from utils.file_handler import (
     save_crop,
     delete_crops,
     mark_uploaded,
+    checkpoint_upload,
     needs_upload,
     migrate_legacy_state,
     read_all_crop_metadata,
@@ -32,6 +33,7 @@ from utils.file_handler import (
 from utils.image_processor import render_image, write_image_atomic, validate_crop, upright_size
 from utils.meural_handler import MeuralHandler
 from utils.jobs import JobRunner
+from utils.render_cache import cached_render
 
 # Configure logging
 logging.basicConfig(
@@ -55,7 +57,7 @@ else:
 immich_handler = ImmichHandler(config.settings["immich"])
 meural_handler = MeuralHandler(config.settings["meural"]["devices"])
 
-jobs = JobRunner()
+jobs = JobRunner(os.path.join(config.CONFIG_DIR, 'jobs.json'))
 ASSET_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 
@@ -107,14 +109,23 @@ def image_response(asset_id, **extra):
     return jsonify({"success": True, "image": get_image(asset_id), **extra})
 
 
-def run_sync(progress):
-    return {"images": len(immich_handler.sync_input_images(config.INPUT_FOLDER, progress=progress))}
+def run_sync(progress, asset_ids=None):
+    options = {'asset_ids': asset_ids} if asset_ids is not None else {}
+    return {"images": len(immich_handler.sync_input_images(config.INPUT_FOLDER, progress=progress, **options))}
+
+
+def job_scope():
+    return {key: config.settings['immich'][key] for key in ('url', 'input_album_id', 'output_album_id')}
+
+
+def start_job(kind, work):
+    return jobs.start(kind, work, scope=job_scope())
 
 
 def initial_sync():
     """Warm the input cache in the background; a failure leaves the web app available."""
     if config.is_configured():
-        return jobs.start("sync", run_sync)
+        return start_job("sync", run_sync)
     return None, False
 
 
@@ -132,7 +143,7 @@ def schedule_syncs(tick=30):
         while True:
             time.sleep(tick)
             if sync_due() and not jobs.running():
-                jobs.start("sync", run_sync)
+                start_job("sync", run_sync)
     threading.Thread(target=loop, name="sync-schedule", daemon=True).start()
 
 
@@ -216,6 +227,13 @@ def get_source_image(asset_id):
     return send_from_directory(config.INPUT_FOLDER, os.path.basename(source_path(asset_id)))
 
 
+@app.route('/editor-image/<identifier>')
+@asset_route()
+def get_editor_image(asset_id):
+    content, key = cached_render(source_path(asset_id), max_size=(2048, 2048), metadata=False)
+    return send_file(io.BytesIO(content), mimetype='image/jpeg', conditional=True, etag=key, max_age=0)
+
+
 @app.route('/thumbnail/<identifier>')
 @asset_route()
 def get_thumbnail(asset_id):
@@ -234,8 +252,8 @@ def get_output_image(asset_id, orientation):
     crop = saved_crop(read_all_crop_metadata().get(asset_id, {}), require_orientation(orientation))
     if not crop:
         abort(404, "Saved crop not found")
-    content = render_image(source_path(asset_id), crop, SIZES[orientation])
-    return send_file(io.BytesIO(content), mimetype='image/jpeg')
+    content, key = cached_render(source_path(asset_id), crop, SIZES[orientation])
+    return send_file(io.BytesIO(content), mimetype='image/jpeg', conditional=True, etag=key, max_age=0)
 
 
 @app.route("/crop", methods=["POST"])
@@ -271,13 +289,14 @@ def reset_image(asset_id):
 @app.route("/sync", methods=["POST"])
 def sync_with_immich():
     """Start syncing the Immich input album; poll /jobs/<id> for progress."""
-    return job_response(*jobs.start("sync", run_sync))
+    return job_response(*start_job("sync", run_sync))
 
 
 @app.route("/jobs")
 def get_jobs():
     """What the UI polls to notice syncs it didn't start (scheduled or at startup)."""
-    return jsonify({"success": True, "running": jobs.running(), "last_sync": jobs.last_finished("sync")})
+    return jsonify({"success": True, "running": jobs.running(), "last_sync": jobs.last_finished("sync"),
+                    "history": jobs.history()})
 
 
 @app.route("/jobs/<int:job_id>")
@@ -286,6 +305,31 @@ def get_job(job_id):
     if not job:
         abort(404, "Job not found")
     return jsonify({"success": True, "job": job})
+
+
+@app.route('/jobs/<int:job_id>/cancel', methods=['POST'])
+def cancel_job(job_id):
+    job = jobs.cancel(job_id)
+    if not job:
+        abort(404, 'Job not found')
+    return jsonify(success=True, job=job)
+
+
+@app.route('/jobs/<int:job_id>/retry', methods=['POST'])
+def retry_job(job_id):
+    job = jobs.get(job_id)
+    if not job:
+        abort(404, 'Job not found')
+    if job['status'] == 'running':
+        abort(409, 'This job is still running')
+    if job['scope'] != job_scope():
+        abort(409, 'Immich settings changed; start a new sync or upload instead')
+    asset_ids = list(dict.fromkeys([*job['errors'], *job['remaining_assets']]))
+    if not asset_ids and job['status'] not in ('failed', 'interrupted', 'cancelled'):
+        abort(400, 'This job has no failed images to retry')
+    work = run_sync if job['kind'] == 'sync' else run_upload_all
+    # A failure before listing the album has no known targets; repeat discovery.
+    return job_response(*start_job(job['kind'], lambda progress: work(progress, asset_ids or None)))
 
 
 class UploadFailure(RuntimeError):
@@ -317,9 +361,30 @@ def upload_saved_crops(asset_id, orientations=None, album_assets=None):
             for orientation in orientations:
                 crop, size = entry[orientation]["crop"], SIZES[orientation]
                 filename = f'{asset_id}_{orientation}.jpg'
+                context = {'server': immich_handler.base_url, 'album': immich_handler.output_album_id}
+                pending = entry[orientation].get('pending_upload')
+                if pending and any(pending.get(key) != value for key, value in context.items()):
+                    raise RuntimeError('An unfinished upload belongs to different Immich settings; restore those settings to finish it')
+
+                def checkpoint(state, selection=crop, output_size=size):
+                    checkpoint_upload(asset_id, orientation, {
+                        **state, **context, 'crop': selection, 'size': list(output_size),
+                        'source_version': source_version(os.path.basename(path)),
+                    })
+
+                previous = find_processed_asset(album_assets, filename)
+                if pending and (pending['crop'] != crop or pending['size'] != list(size) or
+                                pending.get('source_version') != source_version(os.path.basename(path))):
+                    # Finish retiring the earlier copy before publishing a newer selection.
+                    previous = immich_handler.upload_asset(
+                        b'', filename, immich_handler.output_album_id, resume=pending,
+                        checkpoint=lambda state: checkpoint_upload(asset_id, orientation, {**pending, **state}),
+                    )
+                    mark_uploaded(asset_id, orientation, previous, pending['crop'], pending['size'])
+                    pending = None
                 remote_id = immich_handler.upload_asset(
-                    render_image(path, crop, size), filename,
-                    immich_handler.output_album_id, replaces=find_processed_asset(album_assets, filename),
+                    b'' if pending else cached_render(path, crop, size)[0], filename,
+                    immich_handler.output_album_id, replaces=previous, resume=pending, checkpoint=checkpoint,
                 )
                 mark_uploaded(asset_id, orientation, remote_id, crop, size)
                 uploaded.append({'filename': filename, 'asset_id': remote_id,
@@ -355,24 +420,33 @@ def upload_single_crop(asset_id):
         abort(500, str(e))
 
 
-def run_upload_all(progress):
+def run_upload_all(progress, asset_ids=None):
     """Upload every new or changed crop, one image at a time, reporting partial failures."""
     uploaded, failed = [], []
     # Saved coordinates survive removal from the source album; skip those images.
     pending = [asset_id for asset_id, entry in read_all_crop_metadata().items()
-               if get_filename_from_asset_id(asset_id) and any(needs_upload(entry, o) for o in ORIENTATIONS)]
-    progress(0, len(pending))
+               if (asset_ids is None or asset_id in asset_ids) and get_filename_from_asset_id(asset_id)
+               and any(needs_upload(entry, o) for o in ORIENTATIONS)]
+    progress.plan(pending)
     if not pending:
         return {'success': True, 'uploaded_assets': [], 'failed_assets': [], 'error': None}
     # One album fetch for the whole batch; each crop only matches its own entry.
     album_assets = immich_handler.get_album_assets(immich_handler.output_album_id)
-    for done, asset_id in enumerate(pending, 1):
+    for asset_id in pending:
+        if progress.cancelled():
+            break
+        error = None
         try:
             uploaded.extend(upload_saved_crops(asset_id, album_assets=album_assets))
         except UploadFailure as e:
             uploaded.extend(e.uploaded_files)
             failed.append(asset_id)
-        progress(done, len(pending))
+            error = str(e)
+        except (OSError, ValueError) as e:
+            failed.append(asset_id)
+            error = str(e)
+        progress.complete(asset_id, error)
+        progress.result({'success': not failed, 'uploaded_assets': uploaded, 'failed_assets': failed})
     return {'success': not failed, 'uploaded_assets': uploaded, 'failed_assets': failed,
             'error': 'Some crops could not be uploaded' if failed else None}
 
@@ -380,7 +454,7 @@ def run_upload_all(progress):
 @app.route("/upload-all", methods=["POST"])
 def upload_all_processed():
     """Start uploading all saved crops; poll /jobs/<id> for progress."""
-    return job_response(*jobs.start("upload-all", run_upload_all))
+    return job_response(*start_job("upload-all", run_upload_all))
 
 
 @app.route("/delete-original", methods=["DELETE"])
@@ -412,7 +486,7 @@ def preview_on_meural(asset_id):
     if not crop:
         abort(400, 'No crop available')
     try:
-        content = render_image(source_path(asset_id), crop, SIZES[orientation])
+        content, _ = cached_render(source_path(asset_id), crop, SIZES[orientation])
     except ValueError as e:
         abort(400, str(e))
     result = meural_handler.preview_image(device_ip, content)

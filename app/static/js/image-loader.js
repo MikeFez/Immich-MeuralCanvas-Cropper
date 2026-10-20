@@ -195,7 +195,7 @@ function loadImageAndInitCrop(selected) {
         isSelectingImage = false;
     };
     image.style.display = 'none';
-    image.src = `/image/${encodeURIComponent(selected.asset_id)}?v=${encodeURIComponent(selected.source_version || '')}`;
+    image.src = `/editor-image/${encodeURIComponent(selected.asset_id)}?v=${encodeURIComponent(selected.source_version || '')}`;
 }
 
 /**

@@ -186,8 +186,9 @@ Everything lives in that one directory:
 | Path | Contents |
 |------|----------|
 | `config.yaml` | Your configuration |
-| `crops/metadata.json` | Crop coordinates and upload records |
-| `cache/` | Downloaded source images and thumbnails. Disposable: Sync rebuilds it, but keeping it avoids re-downloading every original after the container is recreated. |
+| `crops/metadata.json` | Crop coordinates, upload records and unfinished upload checkpoints |
+| `jobs.json` | The ten most recent background jobs, including errors and unfinished images |
+| `cache/` | Downloaded sources, thumbnails and rendered previews/crops. Disposable: Sync restores sources, and previews rebuild on demand. Keeping it avoids re-downloading originals after the container is recreated. |
 
 Set `CONFIG_DIR` to move the whole directory, or `CACHE_DIR` (formerly
 `APP_TMP_DIR`) to keep the cache elsewhere, e.g. if you back up `/config` and
@@ -336,7 +337,27 @@ Settings lists your albums by name, so you only need IDs when editing
 - Open Manage (top right) for Sync, which downloads new and changed photos from the input album, and Upload All, which renders and uploads every crop that is new or changed since its last upload (or was uploaded at a different size). Manage's Re-upload sends one crop again regardless
 - Filter view to show only unprocessed images; the count beside the switch shows how many are listed
 - Progress shows on the Sync and Upload All buttons, and the Manage icon spins while either runs
-- Images are generated fresh during upload for consistent quality
+   - Review, Meural previews and uploads share the same rendered JPEG cache
+
+#### Background Activity and Recovery
+Manage includes **Recent activity**, with counts, elapsed time and per-image
+errors for Sync and Upload All. **Cancel** stops new images from starting;
+in-flight downloads or uploads finish first, and completed work is kept.
+**Retry failed** processes only failed images. Cancelled jobs and jobs
+interrupted by a restart offer **Retry unfinished**, which also includes images
+that had not started. If a job failed before it could list its images, retry
+repeats album discovery. Retries use current saved crop selections. After
+changing Immich server or album settings, start a new job instead of retrying
+an old one.
+
+Upload checkpoints are saved after the image reaches Immich, after it is added
+to the output album, and after the previous version is trashed. A retry resumes
+the unfinished step using the saved remote ID. If the crop changed in the
+meantime, the previous upload is finished before the new selection is sent.
+An unfinished upload must be completed against its original server and output
+album. As with any remote operation, a connection loss or crash between Immich
+accepting an upload and saving its ID locally can require sending the same
+bytes again; Immich's duplicate detection handles identical uploads.
 
 #### Quality Settings
 The application preserves image quality through:
@@ -347,7 +368,10 @@ The application preserves image quality through:
 - JPEG quality 95 with 4:4:4 chroma sampling
 
 The sidebar uses cached thumbnails up to 320 pixels, with stable versioned URLs
-and conditional HTTP requests. Original photos are fetched only for editing.
+and conditional HTTP requests. The editor loads an upright JPEG up to 2048
+pixels on its longest edge, while all selections and resolution warnings use
+the original's dimensions. Full-resolution sources remain on the server for
+final rendering.
 Sync repairs missing or corrupt cached images and removes local entries that
 leave the source album. Saved crop coordinates remain available if an image is
 added back later. A failed album fetch never triggers cache removal.
@@ -387,9 +411,20 @@ All persistent state lives in one file, **`/config/crops/metadata.json`**:
   automatically on startup; the old file is renamed to `progress.json.migrated`.
 
 ### On-Demand Image Generation
-Crops are never stored as image files. Previews, Meural postcards and uploads
-are all rendered from the source image and the saved coordinates by the same
-pipeline, so what you preview is exactly what gets uploaded.
+
+Rendered crops and editor previews are cached as disposable JPEGs in
+`cache/renders/`. Their keys include the source version, crop coordinates,
+output dimensions, metadata setting and renderer version. Review, Meural
+postcards and uploads reuse the same crop bytes, so what you preview is exactly
+what gets uploaded. Conditional HTTP requests avoid downloading unchanged
+previews again. The render cache is limited to 512 MiB; oldest entries are
+evicted first, and entries unused for 30 days are removed when new renders are
+cached. Deleting the cache is safe: missing renders are recreated on demand.
+
+Immich API requests and source downloads reuse HTTP connections within each
+worker thread. Meural requests use separate pooled sessions. Sessions are
+isolated between threads and integrations, and reset when settings are applied.
+Uploads are not automatically retried by the HTTP transport.
 
 Re-uploading a crop uploads a new version to the output album, then moves the
 previous version to the Immich trash. This avoids the in-place replacement
@@ -412,6 +447,7 @@ endpoints take `{"identifier": "<asset-id>", ...}` and respond with the updated
 ### Images
 - `GET /images`: cached source images with `crops` and `status`
 - `GET /image/{asset_id}`: source image
+- `GET /editor-image/{asset_id}`: cached upright editor preview, up to 2048px
 - `GET /thumbnail/{asset_id}`: 320px thumbnail
 - `GET /output/{orientation}/{asset_id}`: saved crop rendered at frame size
 - `POST /crop`: save a crop (`orientation`, `crop`)
@@ -430,6 +466,11 @@ endpoints take `{"identifier": "<asset-id>", ...}` and respond with the updated
   (the UI polls this to refresh after scheduled syncs)
 - `GET /jobs/{id}`: job status and progress (`status`, `done`, `total`, `result`, `error`).
   Starting a job while another runs returns 409 with the running job.
+- `GET /jobs` also includes recent `history`; jobs include `elapsed_seconds`,
+  per-image `errors`, `remaining_assets` and `cancel_requested`. A job that was
+  running when the app restarted has status `interrupted`.
+- `POST /jobs/{id}/cancel`: request cancellation after in-flight images finish
+- `POST /jobs/{id}/retry`: start a new job for failed or unfinished images
 - `DELETE /delete-original`: remove an image from the input album (the photo stays in the library)
 
 ### Meural

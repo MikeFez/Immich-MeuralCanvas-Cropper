@@ -33,7 +33,7 @@ meural:
                                  'CACHE_DIR': str(directory / 'cache')}):
         # Importing the app must not make synchronous network requests. Its
         # background cache warmup is disabled for this isolated test fixture.
-        with patch('threading.Thread.start'), patch('requests.get') as get, patch('requests.request') as request:
+        with patch('threading.Thread.start'), patch('requests.Session.get') as get, patch('requests.Session.request') as request:
             application = importlib.import_module('app')
             get.assert_not_called()
             request.assert_not_called()

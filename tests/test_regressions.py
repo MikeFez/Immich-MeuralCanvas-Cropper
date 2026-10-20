@@ -28,10 +28,13 @@ class CropRegressionTests(unittest.TestCase):
         shutil.rmtree(self.app.config.INPUT_FOLDER, ignore_errors=True)
         for path in (self.app.config.LEGACY_PROGRESS_FILE, self.app.config.CROP_METADATA_FILE):
             Path(path).unlink(missing_ok=True)
+        shutil.rmtree(Path(self.app.config.CACHE_DIR) / 'renders', ignore_errors=True)
+        Path(self.app.config.CONFIG_DIR, 'jobs.json').unlink(missing_ok=True)
+        self.app.jobs = self.app.JobRunner(str(Path(self.app.config.CONFIG_DIR, 'jobs.json')))
         self.app.config.init_directories()
         seed_image(self.app)
         self.client = self.app.app.test_client()
-        self.outbound = patch('requests.request', side_effect=AssertionError('Live HTTP is forbidden in tests'))
+        self.outbound = patch('requests.Session.request', side_effect=AssertionError('Live HTTP is forbidden in tests'))
         self.outbound.start()
         self.addCleanup(self.outbound.stop)
         # Uploads prefetch the output album; default to an empty one.
@@ -364,7 +367,7 @@ class CropRegressionTests(unittest.TestCase):
     def test_http_calls_always_have_timeout(self):
         response = Mock(ok=True, content=b'{}')
         response.json.return_value = {}
-        with patch('requests.request', return_value=response) as request:
+        with patch('requests.Session.request', return_value=response) as request:
             self.app.immich_handler._make_request('GET', '/server/ping')
         self.assertEqual(request.call_args.kwargs['timeout'], (5, 60))
 
@@ -558,7 +561,7 @@ class CropRegressionTests(unittest.TestCase):
         unparsable = Mock(status_code=200, text='<html>')
         unparsable.json.side_effect = ValueError('not json')
         with patch.object(handler, '_set_preview_duration'), \
-             patch('requests.post', side_effect=[passed, unparsable]) as post:
+             patch('requests.Session.post', side_effect=[passed, unparsable]) as post:
             self.assertTrue(handler.preview_image('127.0.0.1', b'jpeg')['success'])
             self.assertFalse(handler.preview_image('127.0.0.1', b'jpeg')['success'])
         self.assertEqual(post.call_args.kwargs['files']['photo'][2], 'image/jpeg')
@@ -604,7 +607,7 @@ class CropRegressionTests(unittest.TestCase):
         response.iter_content.return_value = [buffer.getvalue()]
         handler = self.app.immich_handler
         with patch.object(handler, '_make_request', return_value={'originalFileName': 'native.png'}), \
-             patch('requests.get', return_value=response):
+             patch('requests.Session.get', return_value=response):
             success, path = handler.download_asset(ASSET, self.app.config.INPUT_FOLDER)
         self.assertTrue(success)
         self.assertTrue(path.endswith('.png'))
@@ -623,7 +626,7 @@ class CropRegressionTests(unittest.TestCase):
         response.__enter__.return_value = response
         response.iter_content.side_effect = chunks
         with patch.object(handler, '_make_request', return_value={'originalFileName': 'original.jpg'}), \
-             patch('requests.get', return_value=response):
+             patch('requests.Session.get', return_value=response):
             success, _ = handler.download_asset(ASSET, self.app.config.INPUT_FOLDER)
         self.assertFalse(success)
         self.assertEqual(path.read_bytes(), original)
@@ -643,7 +646,7 @@ class CropRegressionTests(unittest.TestCase):
         # The conversion branch depends on the source extension. A synthetic
         # JPEG payload exercises it without a fixture HEIC encoder dependency.
         with patch.object(self.app.immich_handler, '_make_request', return_value={'originalFileName': 'source.heic'}), \
-             patch('requests.get', return_value=response):
+             patch('requests.Session.get', return_value=response):
             success, path = self.app.immich_handler.download_asset(ASSET, self.app.config.INPUT_FOLDER)
         self.assertTrue(success)
         with Image.open(path) as output:
@@ -804,6 +807,277 @@ class CropRegressionTests(unittest.TestCase):
             response = self.client.post('/settings/albums', json={'url': 'http://new:2283', 'api_key': 'bad'})
         self.assertEqual(response.status_code, 400)
         self.assertIn('rejected the API key', response.json['error'])
+
+    def test_editor_preview_is_small_upright_and_original_coordinates_remain_valid(self):
+        import io
+        from PIL import Image
+        path = Path(self.app.config.INPUT_FOLDER) / f'{ASSET}.jpg'
+        exif = Image.Exif()
+        exif[274] = 6
+        Image.new('RGB', (4000, 3000), 'orange').save(path, exif=exif)
+        self.assertEqual(self.image()['source_size'], {'width': 3000, 'height': 4000})
+        response = self.client.get(f'/editor-image/{ASSET}')
+        self.assertEqual(response.status_code, 200)
+        with Image.open(io.BytesIO(response.data)) as preview:
+            self.assertEqual(preview.size, (1536, 2048))
+            self.assertNotIn(274, preview.getexif())
+        cached = self.client.get(f'/editor-image/{ASSET}', headers={'If-None-Match': response.headers['ETag']})
+        self.assertEqual(cached.status_code, 304)
+        crop = {'x': 2000, 'y': 2500, 'width': 900, 'height': 1500}
+        self.assertEqual(self.crop(crop=crop).status_code, 200)
+        self.assertEqual(self.saved('portrait'), crop)
+
+    def test_render_cache_reuses_bytes_and_invalidates_for_crop_size_source_and_renderer(self):
+        from utils import render_cache
+        from PIL import Image
+        path = Path(self.app.config.INPUT_FOLDER) / f'{ASSET}.jpg'
+        with patch.object(render_cache, 'render_image', wraps=render_cache.render_image) as render:
+            original, key = render_cache.cached_render(path, PORTRAIT, (90, 160))
+            self.assertEqual(render_cache.cached_render(path, PORTRAIT, (90, 160)), (original, key))
+            self.assertEqual(render.call_count, 1)
+            changed = {**PORTRAIT, 'x': 0}
+            self.assertNotEqual(render_cache.cached_render(path, changed, (90, 160))[1], key)
+            self.assertNotEqual(render_cache.cached_render(path, PORTRAIT, (45, 80))[1], key)
+            Image.new('RGB', (160, 90), 'green').save(path)
+            self.assertNotEqual(render_cache.cached_render(path, PORTRAIT, (90, 160))[1], key)
+            with patch.object(render_cache, 'RENDERER_VERSION', 2):
+                self.assertNotEqual(render_cache.cached_render(path, PORTRAIT, (90, 160))[1], key)
+            self.assertEqual(render.call_count, 5)
+
+    def test_preview_upload_and_meural_share_a_single_cached_render(self):
+        from utils import render_cache
+        self.save(False)
+        with patch.object(render_cache, 'render_image', wraps=render_cache.render_image) as render, \
+             patch.object(self.app.immich_handler, 'upload_asset', return_value='uploaded'), \
+             patch.object(self.app.meural_handler, 'preview_image', return_value={'success': True}):
+            first = self.client.get(f'/output/portrait/{ASSET}')
+            self.assertEqual(self.client.get(f'/output/portrait/{ASSET}', headers={
+                'If-None-Match': first.headers['ETag']}).status_code, 304)
+            self.assertEqual(self.complete().status_code, 200)
+            self.assertEqual(self.client.post('/meural/preview', json={
+                'identifier': ASSET, 'orientation': 'portrait', 'device_ip': '127.0.0.1'}).status_code, 200)
+            self.assertEqual(render.call_count, 1)
+
+    def test_render_cache_bounds_disk_usage(self):
+        from utils import render_cache
+        path = Path(self.app.config.INPUT_FOLDER) / f'{ASSET}.jpg'
+        directory = Path(self.app.config.CACHE_DIR, 'renders')
+        with patch.object(render_cache, 'MAX_BYTES', 1):
+            content, _ = render_cache.cached_render(path, PORTRAIT, (90, 160))
+        self.assertTrue(content.startswith(b'\xff\xd8'))
+        self.assertEqual(list(directory.glob('*.jpg')), [])
+
+    def test_concurrent_preview_requests_render_once(self):
+        from utils import render_cache
+        path = Path(self.app.config.INPUT_FOLDER) / f'{ASSET}.jpg'
+        with patch.object(render_cache, 'render_image', wraps=render_cache.render_image) as render, \
+             ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(lambda _: render_cache.cached_render(path, PORTRAIT, (90, 160)), range(4)))
+        self.assertTrue(all(result == results[0] for result in results))
+        self.assertEqual(render.call_count, 1)
+
+    def test_failed_album_attachment_resumes_without_uploading_again(self):
+        self.save(False)
+        handler = self.app.immich_handler
+        with patch.object(handler, '_make_request', return_value={'id': 'new'}) as request, \
+             patch.object(handler, 'add_assets_to_album', side_effect=[False, True]):
+            self.assertEqual(self.complete().status_code, 500)
+            pending = self.files.read_all_crop_metadata()[ASSET]['portrait']['pending_upload']
+            self.assertEqual(pending['asset_id'], 'new')
+            self.assertFalse(pending['attached'])
+            self.assertEqual(self.complete().status_code, 200)
+            self.assertEqual(request.call_count, 1)
+        state = self.files.read_all_crop_metadata()[ASSET]['portrait']
+        self.assertNotIn('pending_upload', state)
+        self.assertEqual(state['uploaded']['asset_id'], 'new')
+
+    def test_upload_resume_after_final_local_record_write_fails(self):
+        self.save(False)
+        handler = self.app.immich_handler
+        with patch.object(handler, '_make_request', return_value={'id': 'new'}) as request, \
+             patch.object(handler, 'add_assets_to_album', return_value=True) as attach:
+            with patch.object(self.app, 'mark_uploaded', side_effect=OSError('disk full')):
+                self.assertEqual(self.complete().status_code, 500)
+            pending = self.files.read_all_crop_metadata()[ASSET]['portrait']['pending_upload']
+            self.assertTrue(pending['attached'])
+            self.assertEqual(self.complete().status_code, 200)
+            self.assertEqual((request.call_count, attach.call_count), (1, 1))
+        self.assertEqual(self.image()['status'], 'completed')
+
+    def test_failed_cleanup_resumes_only_cleanup(self):
+        self.save(False)
+        handler = self.app.immich_handler
+        handler.get_album_assets.return_value = [{'id': 'old', 'originalFileName': f'{ASSET}_portrait.jpg'}]
+        with patch.object(handler, '_make_request', return_value={'id': 'new'}) as request, \
+             patch.object(handler, 'add_assets_to_album', return_value=True) as attach, \
+             patch.object(handler, 'trash_asset', side_effect=[RuntimeError('offline'), None]) as trash:
+            self.assertEqual(self.complete().status_code, 500)
+            pending = self.files.read_all_crop_metadata()[ASSET]['portrait']['pending_upload']
+            self.assertTrue(pending['attached'])
+            self.assertEqual(pending['replaces'], 'old')
+            self.assertEqual(self.complete().status_code, 200)
+            self.assertEqual((request.call_count, attach.call_count, trash.call_count), (1, 1, 2))
+
+    def test_changed_crop_finishes_pending_upload_before_publishing_new_crop(self):
+        self.save(False)
+        handler = self.app.immich_handler
+        with patch.object(handler, '_make_request', side_effect=[{'id': 'first'}, {'id': 'second'}]) as request, \
+             patch.object(handler, 'add_assets_to_album', side_effect=[False, True, True]), \
+             patch.object(handler, 'trash_asset') as trash:
+            self.assertEqual(self.complete().status_code, 500)
+            changed = {**PORTRAIT, 'x': 0}
+            self.assertTrue(self.files.save_crop(ASSET, 'portrait', changed))
+            self.assertEqual(self.complete().status_code, 200)
+            self.assertEqual(request.call_count, 2)
+            trash.assert_called_once_with('first')
+        state = self.files.read_all_crop_metadata()[ASSET]['portrait']
+        self.assertEqual(state['uploaded']['crop'], changed)
+        self.assertEqual(state['uploaded']['asset_id'], 'second')
+
+    def test_pending_upload_cannot_resume_against_another_server(self):
+        self.save(False)
+        handler = self.app.immich_handler
+        with patch.object(handler, '_make_request', return_value={'id': 'new'}), \
+             patch.object(handler, 'add_assets_to_album', return_value=False):
+            self.assertEqual(self.complete().status_code, 500)
+        with patch.object(handler, 'base_url', 'http://elsewhere'), \
+             patch.object(handler, '_make_request') as request:
+            self.assertEqual(self.complete().status_code, 500)
+            request.assert_not_called()
+
+    def test_cancel_upload_keeps_completed_work_and_retry_only_processes_remaining_images(self):
+        import threading
+        second = '22222222-2222-4222-8222-222222222222'
+        seed_image(self.app, second)
+        self.save(False)
+        self.files.save_crop(second, 'portrait', PORTRAIT)
+        started, release = threading.Event(), threading.Event()
+        def upload(*args, **kwargs):
+            started.set()
+            if not release.wait(5):
+                raise TimeoutError('Upload was not released')
+            return 'uploaded'
+        with patch.object(self.app.immich_handler, 'upload_asset', side_effect=upload) as send:
+            response = self.client.post('/upload-all')
+            job_id = response.json['job']['id']
+            try:
+                self.assertTrue(started.wait(3))
+                self.assertEqual(self.client.post(f'/jobs/{job_id}/cancel').status_code, 200)
+            finally:
+                release.set()
+                self.app.jobs.join(5)
+            job = self.app.jobs.get(job_id)
+            self.assertEqual(job['status'], 'cancelled')
+            self.assertEqual(job['done'], 1)
+            self.assertEqual(job['remaining_assets'], [second])
+            self.assertEqual(send.call_count, 1)
+            response = self.client.post(f'/jobs/{job_id}/retry')
+            self.assertEqual(response.status_code, 202)
+            self.app.jobs.join(5)
+            self.assertEqual(send.call_count, 2)
+            self.assertEqual(send.call_args.args[1], f'{second}_portrait.jpg')
+        restored = self.app.JobRunner(str(Path(self.app.config.CONFIG_DIR, 'jobs.json')))
+        self.assertEqual(restored.get(job_id)['status'], 'cancelled')
+        self.assertGreaterEqual(restored.get(job_id)['elapsed_seconds'], 0)
+
+    def test_failed_images_have_errors_and_retry_excludes_successful_images(self):
+        second = '22222222-2222-4222-8222-222222222222'
+        seed_image(self.app, second)
+        self.save(False)
+        self.files.save_crop(second, 'portrait', PORTRAIT)
+        with patch.object(self.app.immich_handler, 'upload_asset', side_effect=[RuntimeError('server busy'), 'ok']):
+            job = self.run_job('/upload-all')
+        self.assertEqual(job['errors'], {ASSET: 'server busy'})
+        with patch.object(self.app.immich_handler, 'upload_asset', return_value='retried') as send:
+            retried = self.run_job(f"/jobs/{job['id']}/retry")
+            self.assertEqual(retried['total'], 1)
+            self.assertEqual(retried['errors'], {})
+            send.assert_called_once()
+            self.assertEqual(send.call_args.args[1], f'{ASSET}_portrait.jpg')
+
+    def test_restart_preserves_unfinished_job_and_monotonic_ids(self):
+        path = Path(self.app.config.CONFIG_DIR, 'restart-jobs.json')
+        runner = self.app.JobRunner(str(path))
+        with patch('threading.Thread.start'):
+            job, _ = runner.start('sync', lambda progress: None)
+        restored = self.app.JobRunner(str(path))
+        self.assertEqual(restored.get(job['id'])['status'], 'interrupted')
+        new, started = restored.start('sync', lambda progress: {'images': 0})
+        restored.join(3)
+        self.assertTrue(started)
+        self.assertGreater(new['id'], job['id'])
+
+    def test_job_retry_rejects_changed_settings_and_successful_jobs(self):
+        job, _ = self.app.start_job('sync', lambda progress: {'images': 0})
+        self.app.jobs.join(3)
+        self.assertEqual(self.client.post(f"/jobs/{job['id']}/retry").status_code, 400)
+        with patch.dict(self.app.config.settings['immich'], {'output_album_id': 'changed'}):
+            self.assertEqual(self.client.post(f"/jobs/{job['id']}/retry").status_code, 409)
+        self.assertEqual(self.client.post('/jobs/99999/cancel').status_code, 404)
+
+    def test_sync_failures_record_image_errors_and_targeted_retry_preserves_other_cache_entries(self):
+        handler = self.app.immich_handler
+        second = '22222222-2222-4222-8222-222222222222'
+        handler.get_album_assets.return_value = [{'id': ASSET}, {'id': second}]
+        with patch.object(handler, 'download_asset', return_value=(False, 'download timed out')):
+            job = self.run_job('/sync')
+        self.assertEqual(job['status'], 'failed')
+        self.assertEqual(job['errors'], {second: 'download timed out'})
+        def download(asset, folder):
+            seed_image(self.app, asset)
+            return True, str(Path(folder, f'{asset}.jpg'))
+        with patch.object(handler, 'download_asset', side_effect=download) as fetch:
+            retried = self.run_job(f"/jobs/{job['id']}/retry")
+        self.assertEqual(retried['status'], 'done')
+        self.assertEqual(retried['total'], 1)
+        fetch.assert_called_once_with(second, self.app.config.INPUT_FOLDER)
+        self.assertIsNotNone(self.files.get_image(ASSET))
+
+    def test_sync_cancellation_skips_queued_downloads_and_keeps_in_flight_result(self):
+        import threading
+        second = '22222222-2222-4222-8222-222222222222'
+        third = '33333333-3333-4333-8333-333333333333'
+        started, release = threading.Event(), threading.Event()
+        handler = self.app.immich_handler
+        handler.get_album_assets.return_value = [{'id': ASSET}, {'id': second}, {'id': third}]
+        def download(asset, folder):
+            started.set()
+            if not release.wait(5):
+                raise TimeoutError('Download was not released')
+            seed_image(self.app, asset)
+            return True, str(Path(folder, f'{asset}.jpg'))
+        with patch.object(handler, 'download_asset', side_effect=download) as fetch:
+            job, _ = self.app.start_job('sync', lambda progress: {
+                'images': len(handler.sync_input_images(self.app.config.INPUT_FOLDER, progress, workers=1))})
+            try:
+                self.assertTrue(started.wait(3))
+                self.assertEqual(self.client.post(f"/jobs/{job['id']}/cancel").status_code, 200)
+            finally:
+                release.set()
+                self.app.jobs.join(5)
+            finished = self.app.jobs.get(job['id'])
+            self.assertEqual(finished['status'], 'cancelled')
+            self.assertEqual(finished['remaining_assets'], [third])
+            self.assertEqual(finished['done'], 2)
+            fetch.assert_called_once_with(second, self.app.config.INPUT_FOLDER)
+        self.assertIsNotNone(self.files.get_image(second))
+
+    def test_http_sessions_reuse_connections_per_thread(self):
+        import threading
+        from utils.http_client import HttpClient
+        session = HttpClient().session
+        first = session()
+        self.assertIs(first, session())
+        sessions = []
+        def other_thread():
+            sessions.extend([session(), session()])
+        thread = threading.Thread(target=other_thread)
+        thread.start()
+        thread.join(3)
+        self.assertIs(sessions[0], sessions[1])
+        self.assertIsNot(first, sessions[0])
+        self.assertIsNot(first, HttpClient().session())
+        self.assertEqual(first.get_adapter('http://').max_retries.total, 0)
 
     def test_missing_config_starts_unconfigured(self):
         config = self.app.config

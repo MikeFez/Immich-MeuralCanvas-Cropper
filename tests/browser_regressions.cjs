@@ -338,6 +338,97 @@ const second = '22222222-2222-4222-8222-222222222222';
         await fresh.close();
         console.log('PASS: first run opens Settings');
 
+        const scaled = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+        scaled.on('pageerror', error => errors.push(error.message));
+        const originalRequests = [];
+        scaled.on('request', request => {
+            if (new URL(request.url()).pathname.startsWith('/image/')) originalRequests.push(request.url());
+        });
+        await scaled.route('https://**', route => route.fulfill({ status: 200, body: '', contentType: 'text/css' }));
+        await scaled.goto(baseURL);
+        await scaled.waitForFunction(() => window.APP_STATE?.initialized);
+        await scaled.locator('#show-unprocessed-only').uncheck();
+        await scaled.locator(`[data-identifier="${second}"]`).click();
+        await scaled.waitForFunction(() => window._cropRectangleInitialized);
+        const mapping = await scaled.evaluate(() => ({
+            natural: window.ELEMENTS.currentImageEl.naturalWidth,
+            original: sourceImageSize(), crop: { ...window.APP_STATE.portraitCrop },
+            url: window.ELEMENTS.currentImageEl.src
+        }));
+        assert.equal(mapping.natural, 2048);
+        assert.deepEqual(mapping.original, { width: 4097, height: 3073 });
+        assert.ok(mapping.url.includes('/editor-image/'));
+        assert.ok(Math.abs(mapping.crop.height - 3073) < 1);
+        await scaled.evaluate(() => performCrop('portrait'));
+        const persisted = (await (await scaled.request.get(`${baseURL}/images`)).json())
+            .find(image => image.asset_id === second).crops.portrait;
+        for (const key of ['x', 'y', 'width', 'height']) assert.ok(Math.abs(mapping.crop[key] - persisted[key]) < 1);
+        await scaled.setViewportSize({ width: 900, height: 700 });
+        await scaled.waitForFunction(() => {
+            const bounds = window.ELEMENTS.currentImageEl.getBoundingClientRect();
+            return bounds.width < 900 && bounds.height < 700;
+        });
+        const resized = await scaled.evaluate(() => ({ ...window.APP_STATE.portraitCrop }));
+        for (const key of ['x', 'y', 'width', 'height']) assert.ok(Math.abs(persisted[key] - resized[key]) < 1);
+        await scaled.reload();
+        await scaled.waitForFunction(() => window.APP_STATE?.initialized);
+        await scaled.locator(`[data-identifier="${second}"]`).click();
+        await scaled.waitForFunction(() => window._cropRectangleInitialized);
+        const restored = await scaled.evaluate(() => window.APP_STATE.portraitCrop);
+        for (const key of ['x', 'y', 'width', 'height']) assert.ok(Math.abs(persisted[key] - restored[key]) < 1);
+        assert.deepEqual(originalRequests, []);
+        await scaled.close();
+        console.log('PASS: smaller editor previews save, resize and restore crops in original pixels');
+
+        const activity = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+        activity.on('pageerror', error => errors.push(error.message));
+        const job = { id: 9001, kind: 'sync', status: 'running', done: 1, total: 2,
+            elapsed_seconds: 75, cancel_requested: false, errors: {}, remaining_assets: [second] };
+        let history = [job];
+        let cancelled = false;
+        const retries = [];
+        await activity.route('https://**', route => route.fulfill({ status: 200, body: '', contentType: 'text/css' }));
+        await activity.route('**/jobs', route => route.fulfill({ json: {
+            success: true, running: history.find(item => item.status === 'running') || null, history, last_sync: null
+        } }));
+        await activity.route('**/jobs/9001/cancel', route => {
+            cancelled = true;
+            Object.assign(job, { status: 'cancelled', cancel_requested: true });
+            return route.fulfill({ json: { success: true, job } });
+        });
+        await activity.route('**/jobs/*/retry', route => {
+            retries.push(new URL(route.request().url()).pathname);
+            const done = { ...job, id: 9002, status: 'done', done: 1, total: 1,
+                cancel_requested: false, errors: {}, remaining_assets: [], result: { images: 1 } };
+            history = [done, ...history];
+            return route.fulfill({ status: 202, json: { success: true, job: done } });
+        });
+        await activity.goto(baseURL);
+        await activity.waitForFunction(() => window.APP_STATE?.initialized);
+        await activity.locator('#btn-manage').click();
+        const row = activity.locator('[data-job-id="9001"]');
+        assert.match(await row.innerText(), /1\/2 · 1m 15s/);
+        await row.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await row.getByRole('button', { name: 'Retry unfinished' }).waitFor();
+        assert.ok(cancelled);
+        await row.getByRole('button', { name: 'Retry unfinished' }).click();
+        await activity.waitForFunction(() => !syncInProgress);
+        assert.deepEqual(retries, ['/jobs/9001/retry']);
+        await activity.reload();
+        await activity.waitForFunction(() => window.APP_STATE?.initialized);
+        await activity.locator('#btn-manage').click();
+        assert.ok(await activity.locator('[data-job-id="9002"]').isVisible());
+        history = [{ ...job, id: 9003, kind: 'upload-all', status: 'done', cancel_requested: false,
+            errors: { [second]: '<img src=x onerror="window.jobErrorExecuted=true">' } }, ...history];
+        await activity.evaluate(() => watchBackgroundJobs());
+        const failed = activity.locator('[data-job-id="9003"]');
+        assert.ok(await failed.getByRole('button', { name: 'Retry failed', exact: true }).isVisible());
+        await failed.locator('summary').click();
+        assert.ok((await failed.locator('li').innerText()).includes('<img src=x'));
+        assert.equal(await failed.locator('img').count(), 0);
+        await activity.close();
+        console.log('PASS: Manage shows elapsed time, cancellation, retry, history and safe per-image errors');
+
         assert.deepEqual(errors, []);
         assert.deepEqual(dialogs, [], 'native alert/confirm dialogs are not used');
         console.log('PASS: no uncaught browser errors or native dialogs');

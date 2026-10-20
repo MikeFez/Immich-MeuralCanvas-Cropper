@@ -1,81 +1,155 @@
-"""Long Immich operations run in the background so requests return immediately.
-
-Only one job runs at a time: sync and batch upload both walk the cache and the
-albums, and overlapping them gains nothing. The UI polls a job by ID for progress.
-"""
+"""Single background worker with persistent history and cooperative cancellation."""
+import copy
 import itertools
+import json
 import logging
+import os
 import threading
 import time
 
-KEEP = 10  # finished jobs retained for polling
+from utils.file_handler import write_json_atomic
+
+KEEP = 10
+
+
+class JobProgress:
+    def __init__(self, runner, job):
+        self.runner, self.job = runner, job
+
+    def __call__(self, done, total):
+        with self.runner._lock:
+            self.job.update(done=done, total=total)
+            self.runner._save()
+
+    def cancelled(self):
+        with self.runner._lock:
+            return self.job['cancel_requested']
+
+    def plan(self, asset_ids):
+        with self.runner._lock:
+            self.job.update(remaining_assets=list(asset_ids), total=len(asset_ids), done=0)
+            self.runner._save()
+
+    def complete(self, asset_id, error=None):
+        with self.runner._lock:
+            if error:
+                self.job['errors'][asset_id] = str(error)
+            if asset_id in self.job['remaining_assets']:
+                self.job['remaining_assets'].remove(asset_id)
+                self.job['done'] += 1
+            self.runner._save()
+
+    def result(self, result):
+        with self.runner._lock:
+            self.job['result'] = copy.deepcopy(result)
+            self.runner._save()
 
 
 class JobRunner:
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._ids = itertools.count(1)
+    def __init__(self, path=None):
+        self._lock = threading.RLock()
+        self.path = path
         self._jobs = {}
         self._thread = None
-        self._started = {}   # kind -> time.monotonic() of the last start
-        self._finished = {}  # kind -> ID of the last job that completed
+        self._started = {}
+        self._finished = {}
+        if path and os.path.exists(path):
+            with open(path) as stream:
+                history = json.load(stream)
+            for job in history:
+                if job['status'] == 'running':
+                    job.update(status='interrupted', error='Application restarted before the job finished',
+                               finished_at=time.time())
+                self._jobs[job['id']] = job
+                if job['status'] == 'done':
+                    self._finished[job['kind']] = job['id']
+            self._save()
+        self._ids = itertools.count(max(self._jobs, default=0) + 1)
+
+    def _save(self):
+        if self.path:
+            write_json_atomic(self.path, list(self._jobs.values()))
+
+    @staticmethod
+    def _snapshot(job):
+        result = copy.deepcopy(job)
+        result['elapsed_seconds'] = max(0, (job.get('finished_at') or time.time()) - job['started_at'])
+        return result
 
     def _running(self):
-        return next((j for j in self._jobs.values() if j["status"] == "running"), None)
+        return next((job for job in self._jobs.values() if job['status'] == 'running'), None)
 
     def running(self):
-        """The running job, or None."""
         with self._lock:
             job = self._running()
-            return dict(job) if job else None
+            return self._snapshot(job) if job else None
 
-    def start(self, kind, work):
-        """Run work(progress) in a thread. Returns (job, started); if a job is
-        already running, nothing starts and that job is returned instead."""
+    def history(self):
+        with self._lock:
+            return [self._snapshot(job) for job in reversed(list(self._jobs.values()))]
+
+    def start(self, kind, work, scope=None):
         with self._lock:
             running = self._running()
             if running:
-                return dict(running), False
-            job = {"id": next(self._ids), "kind": kind, "status": "running",
-                   "done": 0, "total": 0, "result": None, "error": None}
-            self._jobs[job["id"]] = job
+                return self._snapshot(running), False
+            job = {'id': next(self._ids), 'kind': kind, 'status': 'running',
+                   'done': 0, 'total': 0, 'result': None, 'error': None,
+                   'errors': {}, 'remaining_assets': [], 'cancel_requested': False,
+                   'started_at': time.time(), 'finished_at': None, 'scope': scope}
+            self._jobs[job['id']] = job
             self._started[kind] = time.monotonic()
             for old in sorted(self._jobs)[:-KEEP]:
                 del self._jobs[old]
-            self._thread = threading.Thread(target=self._run, args=(job, work), name=f"job-{kind}", daemon=True)
+            try:
+                self._save()
+            except Exception:
+                del self._jobs[job['id']]
+                raise
+            self._thread = threading.Thread(target=self._run, args=(job, work), name=f'job-{kind}', daemon=True)
             self._thread.start()
-            return dict(job), True
+            return self._snapshot(job), True
 
     def _run(self, job, work):
-        def progress(done, total):
-            with self._lock:
-                job.update(done=done, total=total)
         try:
-            result = work(progress)
+            result = work(JobProgress(self, job))
             with self._lock:
-                job.update(status="done", result=result)
-                self._finished[job["kind"]] = job["id"]
-        except Exception as e:
-            logging.exception("%s job failed", job["kind"])
+                job.update(status='cancelled' if job['cancel_requested'] else 'done', result=result)
+                if job['status'] == 'done':
+                    self._finished[job['kind']] = job['id']
+        except Exception as error:
+            logging.exception('%s job failed', job['kind'])
             with self._lock:
-                job.update(status="failed", error=str(e))
+                job.update(status='cancelled' if job['cancel_requested'] else 'failed', error=str(error))
+        finally:
+            with self._lock:
+                job['finished_at'] = time.time()
+                try:
+                    self._save()
+                except OSError:
+                    logging.exception('Could not persist job history')
+
+    def cancel(self, job_id):
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job and job['status'] == 'running':
+                job['cancel_requested'] = True
+                self._save()
+            return self._snapshot(job) if job else None
 
     def last_started(self, kind):
-        """time.monotonic() when a job of this kind last started, or None."""
         with self._lock:
             return self._started.get(kind)
 
     def last_finished(self, kind):
-        """ID of the last job of this kind that completed, or None."""
         with self._lock:
             return self._finished.get(kind)
 
     def get(self, job_id):
         with self._lock:
             job = self._jobs.get(job_id)
-            return dict(job) if job else None
+            return self._snapshot(job) if job else None
 
     def join(self, timeout=None):
-        """Wait for the most recently started job (used by tests)."""
         if self._thread:
             self._thread.join(timeout)

@@ -1,5 +1,6 @@
 import logging
 import requests
+from utils.http_client import HttpClient
 
 
 class MeuralHandler:
@@ -10,6 +11,7 @@ class MeuralHandler:
 
     def configure(self, devices_config):
         """Use these devices (the meural.devices list from the config)."""
+        self.http = HttpClient()
         self.devices = devices_config
         self._validate_config()
         logging.info(f"Configured {len(self.devices)} Meural devices")
@@ -38,7 +40,7 @@ class MeuralHandler:
     def _set_preview_duration(self, device_ip: str, duration: int):
         """Best effort: a failure only means the device keeps its previous duration."""
         try:
-            response = requests.get(
+            response = self.http.session().get(
                 f"http://{device_ip}/remote/control_command/set_key/",
                 params={"key": "previewDuration", "value": str(duration)},
                 timeout=5,
@@ -61,7 +63,7 @@ class MeuralHandler:
         duration = device.get("preview_duration", 30)
         self._set_preview_duration(device_ip, duration)
         try:
-            response = requests.post(
+            response = self.http.session().post(
                 f"http://{device_ip}/remote/postcard",
                 files={"photo": ("preview.jpg", content, "image/jpeg")},
                 timeout=30,

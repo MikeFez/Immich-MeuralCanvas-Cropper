@@ -18,6 +18,7 @@ function showManageModal() {
 
     // Load images data
     loadManageData();
+    watchBackgroundJobs();
 
     // Prevent body scrolling
     document.body.style.overflow = 'hidden';

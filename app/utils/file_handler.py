@@ -13,6 +13,7 @@ import logging
 import tempfile
 import threading
 from datetime import datetime, timezone
+from utils.image_processor import upright_size
 from config import INPUT_FOLDER, CROP_METADATA_FILE, LEGACY_PROGRESS_FILE, THUMBNAIL_FOLDER, ORIENTATIONS, SIZES
 
 METADATA_DIR = os.path.join(INPUT_FOLDER, ".metadata")
@@ -98,7 +99,16 @@ def delete_crops(asset_id, orientation=None):
 def mark_uploaded(asset_id, orientation, remote_id, crop, size):
     """Record which selection and output size the Immich copy was rendered from."""
     record = {"asset_id": remote_id, "crop": crop, "size": list(size), "at": datetime.now(timezone.utc).isoformat()}
-    _update_entry(asset_id, lambda entry: entry.setdefault(orientation, {}).update(uploaded=record))
+    def update(entry):
+        state = entry.setdefault(orientation, {})
+        state['uploaded'] = record
+        state.pop('pending_upload', None)
+    _update_entry(asset_id, update)
+
+
+def checkpoint_upload(asset_id, orientation, record):
+    """Persist remote side effects before proceeding to the next upload step."""
+    _update_entry(asset_id, lambda entry: entry.setdefault(orientation, {}).update(pending_upload=record))
 
 
 def needs_upload(entry, orientation):
@@ -109,7 +119,7 @@ def needs_upload(entry, orientation):
     uploaded = entry[orientation].get("uploaded") or {}
     size = list(SIZES[orientation])
     # Records from before sizes were tracked count as the current size.
-    return uploaded.get("crop") != crop or uploaded.get("size", size) != size
+    return bool(entry[orientation].get("pending_upload")) or uploaded.get("crop") != crop or uploaded.get("size", size) != size
 
 
 def image_status(entry):
@@ -191,6 +201,7 @@ def _describe(asset_id, source, entry):
         "filename": filename,
         "original_filename": source.get("original_filename", ""),
         "source_version": source_version(filename),
+        "source_size": dict(zip(("width", "height"), upright_size(os.path.join(INPUT_FOLDER, filename)))),
         "crops": {o: saved_crop(entry, o) for o in ORIENTATIONS},
         "status": image_status(entry),
     }

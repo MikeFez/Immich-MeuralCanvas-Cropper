@@ -1504,3 +1504,11 @@ body {
         box-shadow: none;
     }
 }
+.job-history { margin: 0 0 1rem; }
+.job-history h3 { font-size: 1rem; margin: 0 0 .5rem; }
+.job-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; padding: .65rem 0; border-bottom: 1px solid var(--border); }
+.job-summary { flex: 1 1 250px; font-size: .85rem; overflow-wrap: anywhere; }
+.job-actions { display: flex; gap: .5rem; }
+.job-errors { flex-basis: 100%; font-size: .85rem; overflow-wrap: anywhere; }
+.job-errors summary { cursor: pointer; }
+.job-actions button[hidden], .job-errors[hidden] { display: none; }
