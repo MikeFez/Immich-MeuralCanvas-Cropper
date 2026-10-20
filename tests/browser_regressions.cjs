@@ -239,7 +239,7 @@ const second = '22222222-2222-4222-8222-222222222222';
         assert.deepEqual(await step('#btn-crop'), { stage: 3, back: false, save: 'Upload Crops', meural: false,
             dots: 'completed completed active', visible: 'btn-save preview-view landscape-preview' });
         const { width, height } = await page.evaluate(() => getDimensions('landscape'));
-        assert.equal(await page.locator('#landscape-preview .frame-label').innerText(), `Landscape (${width}×${height})`);
+        assert.equal(await page.locator('#landscape-preview .frame-label').textContent(), `Landscape (${width}×${height})`);
         assert.equal((await step('#btn-back')).stage, 2);
         assert.deepEqual(await step('#btn-back'), { stage: 1, back: true, save: 'Upload Crops', meural: false,
             dots: 'active - -', visible: editing });
@@ -284,6 +284,35 @@ const second = '22222222-2222-4222-8222-222222222222';
         assert.ok(saved.immich.has_api_key);
         assert.deepEqual(saved.meural.devices.map(device => device.name), ['Hall']);
         console.log('PASS: Settings loads albums, keeps the saved key, refuses it for a new URL and saves');
+
+        // Phones show the library, then the editor in its place, with a Library button back.
+        const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+        const phone = await phoneContext.newPage();
+        phone.on('pageerror', error => errors.push(error.message));
+        await phone.route('https://**', route => route.fulfill({ status: 200, body: '', contentType: 'text/css' }));
+        await phone.goto(baseURL);
+        await phone.waitForFunction(() => window.APP_STATE?.initialized);
+        await phone.locator('#show-unprocessed-only').uncheck();
+        assert.ok(await phone.locator('.sidebar').isVisible());
+        assert.equal(await phone.locator('#editor-view').isVisible(), false);
+        assert.equal(await phone.locator('#no-image-view').isVisible(), false);
+        assert.equal(await phone.locator('#btn-library').isVisible(), false);
+        await phone.locator(`[data-identifier="${second}"]`).tap();
+        await phone.waitForFunction(() => window._cropRectangleInitialized);
+        assert.equal(await phone.locator('.sidebar').isVisible(), false);
+        assert.ok(await phone.locator('#btn-library').isVisible());
+        // The crop box and the main button both fit on screen without scrolling.
+        for (const selector of ['#crop-rectangle', '#btn-crop']) {
+            const box = await phone.locator(selector).boundingBox();
+            assert.ok(box.width > 0 && box.y >= 0 && box.y + box.height <= 844, selector);
+        }
+        assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 390);
+        await phone.locator('#btn-library').tap();
+        assert.ok(await phone.locator('.sidebar').isVisible());
+        assert.equal(await phone.locator('#editor-view').isVisible(), false);
+        assert.equal(await phone.evaluate(() => window.APP_STATE.currentImage), null);
+        await phoneContext.close();
+        console.log('PASS: phones switch between the library and a full-screen editor');
 
         // First run: without a configuration, Settings opens with the welcome text.
         const fresh = await browser.newPage({ viewport: { width: 1440, height: 1000 } });

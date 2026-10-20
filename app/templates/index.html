@@ -2,22 +2,40 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1b1a18" media="(prefers-color-scheme: dark)">
+    <script>
+        // Bootstrap's components follow the system light/dark setting, like the app's own colors.
+        (() => {
+            const dark = matchMedia('(prefers-color-scheme: dark)');
+            const apply = () => { document.documentElement.dataset.bsTheme = dark.matches ? 'dark' : 'light'; };
+            apply();
+            dark.addEventListener('change', apply);
+        })();
+    </script>
     <title>Meural Canvas Image Cropper</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&display=swap">
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
     <header class="app-header">
-        <h1 class="app-title"><strong>Meural</strong> Canvas Image Cropper</h1>
+        <h1 class="app-title"><strong>Meural</strong> <span class="app-title-long">Canvas Image </span>Cropper</h1>
         <div class="header-actions">
+            <!-- Phones show one pane at a time; this returns from the editor to the library. -->
+            <button id="btn-library" class="header-button" title="Back to the image library">
+                <i class="fas fa-th"></i> <span class="header-button-label">Library</span>
+            </button>
             <button id="btn-manage" class="header-button" title="Sync, upload and manage processed images">
-                <i class="fas fa-list"></i> Manage
+                <i class="fas fa-list"></i> <span class="header-button-label">Manage</span>
             </button>
             <button id="btn-settings" class="header-button" title="Immich, Meural and crop settings">
-                <i class="fas fa-cog"></i> Settings
+                <i class="fas fa-cog"></i> <span class="header-button-label">Settings</span>
             </button>
         </div>
     </header>
@@ -25,7 +43,7 @@
     <div class="container-fluid app-container">
         <div class="row g-0">
             <!-- Sidebar with zero left padding -->
-            <div class="col-3">
+            <div class="col-3 library-pane">
                 <div class="sidebar">
                     <div class="filter-container">
                       <div class="form-check form-switch">
@@ -49,7 +67,7 @@
             </div>
 
             <!-- Main content area -->
-            <div class="col-9">
+            <div class="col-9 editor-pane">
                 <!-- Container for both views -->
                 <div class="view-container">
                     <div id="editor-view" class="main-content" style="display: none;">
@@ -159,10 +177,10 @@
 
             <div class="manage-modal-body">
                 <div class="manage-toolbar">
-                    <button id="btn-immich-sync" class="btn btn-primary" title="Download new and changed photos from the Immich input album">
+                    <button id="btn-immich-sync" class="btn btn-meural" title="Download new and changed photos from the Immich input album">
                         <i class="fas fa-sync-alt"></i> Sync
                     </button>
-                    <button id="btn-immich-upload" class="btn btn-success" title="Upload every saved crop to the Immich output album">
+                    <button id="btn-immich-upload" class="btn btn-meural btn-secondary" title="Upload every saved crop to the Immich output album">
                         <i class="fas fa-cloud-upload-alt"></i> Upload All
                     </button>
                     <span class="manage-toolbar-help">Sync downloads the input album; Upload All sends every saved crop to the output album.</span>

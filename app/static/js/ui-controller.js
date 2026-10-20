@@ -36,6 +36,7 @@ const ELEMENT_IDS = {
     btnImmichUpload: 'btn-immich-upload',
     btnMeuralPreview: 'btn-meural-preview',
     btnManage: 'btn-manage',
+    btnLibrary: 'btn-library',
     manageModal: 'manage-modal',
     manageModalClose: 'manage-modal-close',
     manageTableLoading: 'manage-table-loading',
@@ -84,6 +85,7 @@ function updateStage() {
     show(E.btnSkipEl, !review);
     show(E.btnSaveEl, review);
     E.cropResolutionEl.hidden = review;
+    E.editorViewEl.classList.toggle('reviewing', review);
 
     if (review) {
         E.stageNameEl.innerHTML = '<strong>Review</strong> Crops';
@@ -131,6 +133,8 @@ function showView(viewName) {
     // '' falls back to the stylesheet's flex layout.
     ELEMENTS.editorViewEl.style.display = editing ? '' : 'none';
     ELEMENTS.noImageViewEl.style.display = editing ? 'none' : '';
+    // On phones this switches between the library and the editor pane.
+    document.body.classList.toggle('editing', editing);
     if (!editing) {
         ELEMENTS.cropOverlayEl.style.display = 'none';
         ELEMENTS.cropRectangleEl.style.display = 'none';

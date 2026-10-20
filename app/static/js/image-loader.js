@@ -123,6 +123,18 @@ function addImageClickHandlers() {
  */
 let isSelectingImage = false;
 
+/** Leave the editor for the library (phones show one at a time), keeping the last image in view. */
+function showLibrary() {
+    if (window.APP_STATE.cropBusy || isSelectingImage) return;
+    const active = window.ELEMENTS.imageGridEl.querySelector('.image-grid-item.active');
+    window.APP_STATE.currentImage = null;
+    showView('no-image-view');
+    active?.classList.remove('active');
+    active?.scrollIntoView({ block: 'nearest' });
+}
+
+window.ELEMENTS.btnLibraryEl.addEventListener('click', showLibrary);
+
 function selectImage(assetId, stage = 1) {
     if (window.APP_STATE.syncing || window.APP_STATE.cropBusy || isSelectingImage) {
         console.log("Skipping image selection - operation in progress");
