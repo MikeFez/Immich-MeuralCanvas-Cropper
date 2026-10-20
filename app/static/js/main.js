@@ -50,6 +50,9 @@ async function initializeApp() {
         const stage = window.APP_STATE.currentStage;
         if (!currentImage || (stage !== 1 && stage !== 2)) return;
         const orientation = stage === 1 ? 'portrait' : 'landscape';
+        if (currentImage.uploaded?.[orientation] && !await confirmDialog(
+            `This ${orientation} crop is already in Immich. Skipping it moves that copy to the Immich trash.`,
+            `Skip ${orientation}`, true)) return;
         await deleteCropMetadata(currentImage.asset_id, orientation);
         window.APP_STATE[orientation + 'Crop'] = { x: 0, y: 0, width: 0, height: 0 };
         clearPreviewImage(orientation);
@@ -67,6 +70,15 @@ async function initializeApp() {
             updateStage();
         }
     });
+
+    // On Review, clicking a framed crop goes back to adjust it.
+    for (const frame of document.querySelectorAll('#preview-view .photo-frame')) {
+        setupButtonHandler(frame, () => {
+            if (window.APP_STATE.syncing || window.APP_STATE.cropBusy || window.APP_STATE.currentStage !== 3) return;
+            window.APP_STATE.currentStage = Number(frame.dataset.stage);
+            updateStage();
+        });
+    }
 
     setupButtonHandler(window.ELEMENTS.btnResetEl, () => runCropAction(() => resetImage()));
 

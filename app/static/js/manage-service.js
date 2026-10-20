@@ -138,7 +138,11 @@ function createManageTableRow(image) {
  * Delete a crop image (portrait or landscape)
  */
 async function deleteCropImage(identifier, orientation) {
-    if (!await confirmDialog(`Delete the ${orientation} crop?`, 'Delete', true)) {
+    const uploaded = window.APP_STATE.imageList?.find(image => image.asset_id === identifier)?.uploaded?.[orientation];
+    const message = uploaded
+        ? `Delete the ${orientation} crop? Its uploaded copy is moved to the Immich trash.`
+        : `Delete the ${orientation} crop?`;
+    if (!await confirmDialog(message, 'Delete', true)) {
         return;
     }
 

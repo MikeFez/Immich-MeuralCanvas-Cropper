@@ -23,3 +23,7 @@ meural:
 # How often to sync the input album, in minutes (0 = off)
 sync:
   interval_minutes: 15
+
+# The frame drawn around Review previews: light-wood, dark-wood, black or white
+display:
+  frame: light-wood

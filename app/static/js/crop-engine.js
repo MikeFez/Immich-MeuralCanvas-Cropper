@@ -40,7 +40,20 @@ function forceImageFit() {
     if (stage === 1 || stage === 2) initCropRectangle(getAspectRatio(stage === 1 ? 'portrait' : 'landscape'));
 }
 
-/** Restore a saved/draft selection, or center the largest crop with the target ratio. */
+/**
+ * Where a new crop should be centered, as fractions of the image: the middle of
+ * the faces Immich found (all of them together), or the middle of the photo.
+ */
+function cropFocus(faces) {
+    if (!faces?.length) return { x: 0.5, y: 0.5 };
+    const [left, top, right, bottom] = faces.reduce(([l, t, r, b], [fl, ft, fr, fb]) =>
+        [Math.min(l, fl), Math.min(t, ft), Math.max(r, fr), Math.max(b, fb)], [1, 1, 0, 0]);
+    return { x: (left + right) / 2, y: (top + bottom) / 2 };
+}
+
+const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
+
+/** Restore a saved/draft selection, or place the largest crop with the target ratio on the faces. */
 function initCropRectangle(aspectRatio) {
     const { currentImageEl: image, editorContainerEl: container, cropRectangleEl: rectangle } = window.ELEMENTS;
     if (!image?.complete || !image.naturalWidth || !rectangle) return;
@@ -54,7 +67,9 @@ function initCropRectangle(aspectRatio) {
     const saved = window.APP_STATE[stage === 1 ? 'portraitCrop' : 'landscapeCrop'];
     let width = Math.min(bounds.width, bounds.height * aspectRatio);
     let height = width / aspectRatio;
-    let x = (bounds.width - width) / 2, y = (bounds.height - height) / 2;
+    const focus = cropFocus(window.APP_STATE.currentImage?.faces);
+    let x = clamp(focus.x * bounds.width - width / 2, 0, bounds.width - width);
+    let y = clamp(focus.y * bounds.height - height / 2, 0, bounds.height - height);
     if (saved?.width > 0 && saved?.height > 0) {
         const scaleX = bounds.width / sourceImageSize().width, scaleY = bounds.height / sourceImageSize().height;
         width = Math.min(bounds.width, saved.width * scaleX);

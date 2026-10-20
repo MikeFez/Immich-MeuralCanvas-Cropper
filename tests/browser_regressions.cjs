@@ -245,6 +245,45 @@ const second = '22222222-2222-4222-8222-222222222222';
             dots: 'active - -', visible: editing });
         console.log('PASS: stage controls match each stage, including review with both orientations skipped');
 
+        // A new crop is centered on the faces Immich found, or on the photo without any.
+        const placement = await page.evaluate(() => {
+            const place = faces => {
+                window.APP_STATE.portraitCrop = { x: 0, y: 0, width: 0, height: 0 };
+                window.APP_STATE.currentImage.faces = faces;
+                initCropRectangle(getAspectRatio('portrait'));
+                return { ...window.APP_STATE.portraitCrop };
+            };
+            const right = place([[0.8, 0.2, 0.9, 0.4]]);
+            const left = place([[0.05, 0.1, 0.1, 0.2], [0.2, 0.1, 0.3, 0.2]]);
+            return { right, left, middle: place([]), width: sourceImageSize().width };
+        });
+        assert.ok(Math.abs(placement.right.x + placement.right.width - placement.width) < 3, 'faces at the right edge');
+        assert.ok(Math.abs(placement.left.x) < 3, 'faces near the left edge');
+        assert.ok(Math.abs(placement.middle.x - (placement.width - placement.middle.width) / 2) < 3, 'no faces: centered');
+        console.log('PASS: new crops are placed on detected faces');
+
+        // Skipping a crop that is already in Immich asks first, since its copy is trashed.
+        await page.evaluate(() => { window.APP_STATE.currentImage.uploaded = { portrait: true, landscape: false }; });
+        await page.locator('#btn-skip').click();
+        assert.match(await page.locator('.confirm-dialog').innerText(), /moves that copy to the Immich trash/);
+        await page.keyboard.press('Escape');
+        await page.waitForFunction(() => !window.APP_STATE.cropBusy);
+        assert.equal(await page.evaluate(() => window.APP_STATE.currentStage), 1);
+        await page.evaluate(() => { window.APP_STATE.currentImage.uploaded = { portrait: false, landscape: false }; });
+        console.log('PASS: skipping an uploaded crop asks before trashing it');
+
+        // On Review, clicking a framed crop goes back to that crop's step.
+        await step('#btn-skip');
+        assert.equal((await step('#btn-crop')).stage, 3);
+        assert.equal(await page.locator('#landscape-preview .photo-frame').evaluate(frame =>
+            getComputedStyle(frame).backgroundColor), 'rgb(176, 137, 104)');
+        await page.locator('#landscape-preview .photo-frame').click();
+        await page.waitForFunction(() => window.APP_STATE.currentStage === 2);
+        await page.evaluate(() => new Promise(requestAnimationFrame));
+        assert.equal((await view()).visible, editing);
+        assert.equal((await step('#btn-back')).stage, 1);
+        console.log('PASS: clicking a framed crop on Review returns to adjust it, framed in light wood by default');
+
         // Settings: albums come from Immich (faked here); the saved key is never sent to the browser.
         await page.route('**/settings/albums', route => route.fulfill({ json: { success: true, albums: [
             { id: 'source-album', name: 'Queue', assets: 2, shared: false },
@@ -276,6 +315,8 @@ const second = '22222222-2222-4222-8222-222222222222';
         await page.locator('[name="add_device"]').click();
         await page.locator('.settings-device [name="name"]').last().fill('Hall');
         await page.locator('.settings-device [name="ip"]').last().fill('10.0.0.9');
+        assert.equal(await field('frame').inputValue(), 'light-wood');
+        await field('frame').selectOption('black');
         await page.locator('[name="save"]').click();
         await page.waitForFunction(() => document.getElementById('settings-modal').style.display === 'none');
         assert.ok((await toasts()).includes('Settings saved'));
@@ -283,6 +324,8 @@ const second = '22222222-2222-4222-8222-222222222222';
         assert.equal(saved.immich.output_album_id, 'new-output');
         assert.ok(saved.immich.has_api_key);
         assert.deepEqual(saved.meural.devices.map(device => device.name), ['Hall']);
+        assert.equal(saved.display.frame, 'black');
+        assert.equal(await page.evaluate(() => document.documentElement.dataset.frame), 'black');
         console.log('PASS: Settings loads albums, keeps the saved key, refuses it for a new URL and saves');
 
         // Phones show the library, then the editor in its place, with a Library button back.

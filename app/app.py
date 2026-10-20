@@ -6,6 +6,7 @@ import io
 import threading
 import time
 import requests
+from datetime import datetime, timezone
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, send_from_directory, send_file, abort
 from werkzeug.exceptions import HTTPException
@@ -21,6 +22,9 @@ from utils.file_handler import (
     delete_crops,
     mark_uploaded,
     checkpoint_upload,
+    upload_records,
+    forget_uploads,
+    forget_missing_uploads,
     needs_upload,
     migrate_legacy_state,
     read_all_crop_metadata,
@@ -111,7 +115,55 @@ def image_response(asset_id, **extra):
 
 def run_sync(progress, asset_ids=None):
     options = {'asset_ids': asset_ids} if asset_ids is not None else {}
-    return {"images": len(immich_handler.sync_input_images(config.INPUT_FOLDER, progress=progress, **options))}
+    result = {"images": len(immich_handler.sync_input_images(config.INPUT_FOLDER, progress=progress, **options))}
+    if not progress.cancelled():
+        result["reuploads"] = reconcile_uploads()
+    return result
+
+
+def reconcile_uploads():
+    """Make crops whose Immich copy left the destination album pending again.
+
+    Returns how many images changed, or None when the album couldn't be read
+    (the sync itself still succeeded).
+    """
+    listed_at = datetime.now(timezone.utc).isoformat()
+    try:
+        album_assets = immich_handler.get_album_assets(immich_handler.output_album_id)
+    except Exception as e:
+        logging.warning("Could not check the destination album for removed uploads: %s", e)
+        return None
+    changed = forget_missing_uploads({asset["id"] for asset in album_assets},
+                                     lambda filename: find_processed_asset(album_assets, filename), listed_at)
+    if changed:
+        logging.info("%d image(s) have crops missing from the destination album; they need uploading again", len(changed))
+    return len(changed)
+
+
+def retire_uploads(asset_id, orientations):
+    """Trash the Immich copies of these crops and forget them.
+
+    Only copies still in the destination album are trashed, so a photo moved or
+    already deleted in Immich is never touched.
+    """
+    entry = read_all_crop_metadata().get(asset_id, {})
+    records = {o: upload_records(entry, o) for o in orientations}
+    if not any(records.values()):
+        return
+    try:
+        album_assets = immich_handler.get_album_assets(immich_handler.output_album_id)
+        present = {asset["id"] for asset in album_assets}
+        for orientation, found in records.items():
+            if not found:
+                continue
+            remote_ids = {record.get("asset_id") for record in found}
+            if None in remote_ids:
+                remote_ids.add(find_processed_asset(album_assets, f"{asset_id}_{orientation}.jpg"))
+            for remote_id in sorted(remote_ids & present):
+                immich_handler.trash_asset(remote_id)
+            forget_uploads(asset_id, orientation)
+    except (requests.RequestException, RuntimeError, ValueError) as e:
+        abort(502, f"Could not remove the uploaded copy from Immich: {e}")
 
 
 def job_scope():
@@ -156,7 +208,7 @@ def job_response(job, started):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", frame=config.settings["display"]["frame"])
 
 
 @app.route("/dimensions")
@@ -275,7 +327,8 @@ def handle_crop(asset_id):
 @app.route("/crop-data/<identifier>/<orientation>", methods=["DELETE"])
 @asset_route(lock=True)
 def delete_crop_data(asset_id, orientation):
-    delete_crops(asset_id, require_orientation(orientation))
+    retire_uploads(asset_id, [require_orientation(orientation)])
+    delete_crops(asset_id, orientation)
     return image_response(asset_id)
 
 

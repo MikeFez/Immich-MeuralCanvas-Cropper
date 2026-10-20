@@ -100,7 +100,7 @@ class CropRegressionTests(unittest.TestCase):
             release.set()
             self.app.jobs.join(5)
         finished = self.client.get(f'/jobs/{job_id}').json['job']
-        self.assertEqual((finished['status'], finished['result']), ('done', {'images': 3}))
+        self.assertEqual((finished['status'], finished['result']), ('done', {'images': 3, 'reuploads': 0}))
         self.assertEqual(self.client.get('/jobs/9999').status_code, 404)
 
     def test_sync_downloads_in_parallel_and_reports_each_asset(self):
@@ -222,16 +222,105 @@ class CropRegressionTests(unittest.TestCase):
         self.assertEqual(self.client.post('/crop', json={'identifier': missing, 'orientation': 'portrait',
                                                          'crop': PORTRAIT}).status_code, 404)
 
-    def test_delete_updates_status_and_keeps_upload_record(self):
+    def test_delete_trashes_the_uploaded_copy_in_the_destination_album(self):
         self.save()
         self.uploaded('portrait')
-        response = self.client.delete(f'/crop-data/{ASSET}/portrait')
+        self.uploaded('landscape')
+        handler = self.app.immich_handler
+        with patch.object(handler, 'get_album_assets', return_value=[{'id': 'p'}, {'id': 'l'}]), \
+             patch.object(handler, 'trash_asset') as trash:
+            response = self.client.delete(f'/crop-data/{ASSET}/portrait')
         self.assertEqual(response.status_code, 200)
+        trash.assert_called_once_with('p')
         self.assertEqual(response.json['image']['crops'], {'portrait': None, 'landscape': LANDSCAPE})
+        self.assertEqual(response.json['image']['uploaded'], {'portrait': False, 'landscape': True})
+        self.assertNotIn('portrait', self.files.read_all_crop_metadata()[ASSET])
+
+    def test_delete_never_trashes_a_copy_outside_the_destination_album(self):
+        self.save()
+        self.uploaded('portrait')
+        handler = self.app.immich_handler
+        # 'p' is gone from the album (moved or deleted in Immich); only the record goes.
+        with patch.object(handler, 'get_album_assets', return_value=[{'id': 'other'}]), \
+             patch.object(handler, 'trash_asset') as trash:
+            response = self.client.delete(f'/crop-data/{ASSET}/portrait')
+        self.assertEqual(response.status_code, 200)
+        trash.assert_not_called()
         self.assertEqual(response.json['image']['status'], 'landscape')
-        self.assertEqual(self.files.read_all_crop_metadata()[ASSET]['portrait']['uploaded']['asset_id'], 'p')
         self.client.delete(f'/crop-data/{ASSET}/landscape')
         self.assertEqual(self.image()['status'], 'unprocessed')
+
+    def test_delete_without_upload_does_not_contact_immich(self):
+        self.save()
+        with patch.object(self.app.immich_handler, 'get_album_assets') as album:
+            self.assertEqual(self.client.delete(f'/crop-data/{ASSET}/portrait').status_code, 200)
+        album.assert_not_called()
+
+    def test_delete_of_legacy_upload_finds_the_copy_by_filename(self):
+        self.save()
+        self.files.mark_uploaded(ASSET, 'portrait', None, PORTRAIT, self.app.config.SIZES['portrait'])
+        album = [{'id': 'legacy', 'originalFileName': f'{ASSET}_portrait.jpg'}]
+        handler = self.app.immich_handler
+        with patch.object(handler, 'get_album_assets', return_value=album), patch.object(handler, 'trash_asset') as trash:
+            self.assertEqual(self.client.delete(f'/crop-data/{ASSET}/portrait').status_code, 200)
+        trash.assert_called_once_with('legacy')
+
+    def test_failed_trash_keeps_the_crop_and_its_record(self):
+        self.save()
+        self.uploaded('portrait')
+        handler = self.app.immich_handler
+        with patch.object(handler, 'get_album_assets', return_value=[{'id': 'p'}]), \
+             patch.object(handler, 'trash_asset', side_effect=self.app.requests.ConnectionError('offline')):
+            response = self.client.delete(f'/crop-data/{ASSET}/portrait')
+        self.assertEqual(response.status_code, 502)
+        self.assertIn('offline', response.json['error'])
+        self.assertEqual(self.saved('portrait'), PORTRAIT)
+        self.assertEqual(self.files.read_all_crop_metadata()[ASSET]['portrait']['uploaded']['asset_id'], 'p')
+
+    def test_sync_makes_crops_deleted_from_immich_pending_again(self):
+        self.save()
+        self.uploaded('portrait')
+        self.uploaded('landscape')
+        self.assertEqual(self.image()['status'], 'completed')
+        handler = self.app.immich_handler
+        with patch.object(handler, 'sync_input_images', return_value=[{}]), \
+             patch.object(handler, 'get_album_assets', return_value=[{'id': 'l'}]):
+            job = self.run_job('/sync')
+        self.assertEqual(job['result'], {'images': 1, 'reuploads': 1})
+        image = self.image()
+        self.assertEqual(image['status'], 'both')
+        self.assertEqual(image['uploaded'], {'portrait': False, 'landscape': True})
+        self.assertEqual(image['crops'], {'portrait': PORTRAIT, 'landscape': LANDSCAPE})
+
+    def test_reconcile_keeps_recent_unfinished_and_legacy_uploads(self):
+        self.save()
+        self.uploaded('portrait')
+        self.files.checkpoint_upload(ASSET, 'landscape', {'asset_id': 'pending'})
+        legacy = '22222222-2222-4222-8222-222222222222'
+        self.files.save_crop(legacy, 'portrait', PORTRAIT)
+        self.files.mark_uploaded(legacy, 'portrait', None, PORTRAIT, self.app.config.SIZES['portrait'])
+        album = [{'id': 'x', 'originalFileName': f'{legacy}_portrait.jpg'}]
+        # Uploaded after the album was listed: not yet in the listing, but kept.
+        changed = self.files.forget_missing_uploads({'x'}, lambda name: self.app.find_processed_asset(album, name),
+                                                    '2000-01-01T00:00:00+00:00')
+        self.assertEqual(changed, [])
+        changed = self.files.forget_missing_uploads({'x'}, lambda name: self.app.find_processed_asset(album, name),
+                                                    '2999-01-01T00:00:00+00:00')
+        self.assertEqual(changed, [ASSET])
+        crops = self.files.read_all_crop_metadata()
+        self.assertNotIn('uploaded', crops[ASSET]['portrait'])
+        self.assertEqual(crops[ASSET]['landscape']['pending_upload'], {'asset_id': 'pending'})
+        self.assertIn('uploaded', crops[legacy]['portrait'])
+
+    def test_sync_succeeds_when_the_destination_album_cannot_be_read(self):
+        self.save()
+        self.uploaded('portrait')
+        handler = self.app.immich_handler
+        with patch.object(handler, 'sync_input_images', return_value=[]), \
+             patch.object(handler, 'get_album_assets', side_effect=RuntimeError('offline')):
+            job = self.run_job('/sync')
+        self.assertEqual((job['status'], job['result']), ('done', {'images': 0, 'reuploads': None}))
+        self.assertIn('uploaded', self.files.read_all_crop_metadata()[ASSET]['portrait'])
 
     def test_reset_clears_saved_crops(self):
         self.save()
@@ -276,6 +365,45 @@ class CropRegressionTests(unittest.TestCase):
             response = self.client.delete('/delete-original', json={'identifier': ASSET})
         self.assertEqual(response.status_code, 502)
         self.assertEqual(len(self.client.get('/images').json), 1)
+
+    def test_face_boxes_prefer_visible_people_and_normalize(self):
+        from utils.immich_handler import face_boxes
+        face = lambda x1, y1, x2, y2, person=None: {
+            'boundingBoxX1': x1, 'boundingBoxY1': y1, 'boundingBoxX2': x2, 'boundingBoxY2': y2,
+            'imageWidth': 200, 'imageHeight': 100, 'person': person}
+        visible, hidden, unassigned = face(20, 10, 60, 50, {'id': 'a'}), face(0, 0, 10, 10, {'isHidden': True}), face(100, 0, 120, 20)
+        self.assertEqual(face_boxes([visible, hidden, unassigned]), [[0.1, 0.1, 0.3, 0.5]])
+        self.assertEqual(face_boxes([hidden, unassigned]), [[0.5, 0.0, 0.6, 0.2]])
+        self.assertEqual(face_boxes([{'imageWidth': 0}, face(-5, 0, 250, 50)]), [[0.0, 0.0, 1.0, 0.5]])
+        self.assertEqual(face_boxes([]), [])
+
+    def test_sync_fetches_faces_once_for_cached_images(self):
+        from datetime import datetime, timedelta, timezone
+        from utils.immich_handler import faces_stale
+        handler = self.app.immich_handler
+        faces = [{'boundingBoxX1': 0, 'boundingBoxY1': 0, 'boundingBoxX2': 40, 'boundingBoxY2': 45,
+                  'imageWidth': 160, 'imageHeight': 90, 'person': {'id': 'a'}}]
+        with patch.object(handler, 'get_album_assets', return_value=[{'id': ASSET}]), \
+             patch.object(handler, '_make_request', return_value=faces) as request:
+            handler.sync_input_images(self.app.config.INPUT_FOLDER)
+            handler.sync_input_images(self.app.config.INPUT_FOLDER)
+        request.assert_called_once_with('GET', '/faces', params={'id': ASSET})
+        self.assertEqual(self.image()['faces'], [[0.0, 0.0, 0.25, 0.5]])
+        now = datetime.now(timezone.utc)
+        self.assertFalse(faces_stale({'faces': [], 'faces_at': (now - timedelta(hours=1)).isoformat()}, now))
+        self.assertTrue(faces_stale({'faces': [], 'faces_at': (now - timedelta(days=2)).isoformat()}, now))
+
+    def test_missing_face_permission_is_asked_once_and_keeps_the_cache(self):
+        handler = self.app.immich_handler
+        self.addCleanup(setattr, handler, 'faces_denied', False)
+        response = Mock(status_code=403)
+        denied = self.app.requests.HTTPError('403', response=response)
+        with patch.object(handler, 'get_album_assets', return_value=[{'id': ASSET}]), \
+             patch.object(handler, '_make_request', side_effect=denied) as request:
+            self.assertEqual(len(handler.sync_input_images(self.app.config.INPUT_FOLDER)), 1)
+            handler.sync_input_images(self.app.config.INPUT_FOLDER)
+        request.assert_called_once()
+        self.assertEqual(self.image()['faces'], [])
 
     def test_trash_helper_passes_correct_method_endpoint_and_json(self):
         with patch.object(self.app.immich_handler, '_make_request', return_value={}) as request:
@@ -733,6 +861,17 @@ class CropRegressionTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 400)
                 self.assertIn(message, response.json['error'])
         self.assertEqual(self.app.immich_handler.output_album_id, 'output-album')
+
+    def test_frame_finish_defaults_validates_and_reaches_the_page(self):
+        self.keep_settings()
+        self.assertEqual(self.client.get('/settings').json['settings']['display'], {'frame': 'light-wood'})
+        self.assertIn(b'data-frame="light-wood"', self.client.get('/').data)
+        payload = self.settings_payload()
+        payload['display'] = {'frame': 'mahogany'}
+        self.assertEqual(self.client.put('/settings', json=payload).status_code, 400)
+        payload['display'] = {'frame': 'black'}
+        self.assertEqual(self.client.put('/settings', json=payload).status_code, 200)
+        self.assertIn(b'data-frame="black"', self.client.get('/').data)
 
     def test_sync_interval_is_validated_and_defaults_to_15_minutes(self):
         self.keep_settings()

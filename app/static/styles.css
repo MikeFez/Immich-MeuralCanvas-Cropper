@@ -608,14 +608,50 @@ body {
     margin-bottom: 12px;
 }
 
+/* Frame finishes, chosen in Settings; light wood is the default. */
+:root[data-frame="dark-wood"] { --frame: #5b3b28; }
+:root[data-frame="black"] { --frame: #1b1b1a; }
+:root[data-frame="white"] { --frame: #f3f1ec; }
+
+/* A button: clicking a framed crop goes back to adjust it. */
 .photo-frame {
+    position: relative;
     background-color: var(--frame);
+    border: 0;
     border-radius: 3px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.1);
+    box-shadow: inset 0 0 0 1px rgba(127, 127, 127, 0.3), 0 4px 8px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.1);
     padding: min(15px, 3vw);
     transition: transform 0.3s ease;
     display: inline-block;
     max-width: 95%;
+    cursor: pointer;
+}
+
+.photo-frame:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 4px;
+}
+
+.frame-edit-hint {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.65);
+    color: #ffffff;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+.photo-frame:hover .frame-edit-hint,
+.photo-frame:focus-visible .frame-edit-hint {
+    opacity: 1;
 }
 
 .photo-frame:hover {
@@ -624,6 +660,7 @@ body {
 
 .frame-mat {
     background-color: #ffffff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
     padding: min(15px, 3vw);
     display: flex;
     justify-content: center;
@@ -1501,6 +1538,16 @@ body {
         transform: none;
     }
 
+    /* No hover to reveal it, so the hint stays visible, out of the photo's center. */
+    .frame-edit-hint {
+        opacity: 1;
+        top: auto;
+        bottom: 22px;
+        transform: translateX(-50%);
+        padding: 4px 10px;
+        font-size: 0.75rem;
+    }
+
     .image-grid-item:not(.active):hover {
         box-shadow: none;
     }
@@ -1513,3 +1560,4 @@ body {
 .job-errors { flex-basis: 100%; font-size: .85rem; overflow-wrap: anywhere; }
 .job-errors summary { cursor: pointer; }
 .job-actions button[hidden], .job-errors[hidden] { display: none; }
+.settings-frame { max-width: 280px; margin-bottom: 1rem; }

@@ -214,8 +214,10 @@ Open **Settings** (top right). On first start it opens by itself.
    listed too; the two must be different. **Sync every** sets how often the
    input album is checked for new and changed photos (default 15 minutes; 0
    turns it off). Open pages pick up the changes by themselves.
-3. Add your Meural Canvas devices (optional) and set the crop sizes to your
-   Canvas's resolution.
+3. Add your Meural Canvas devices (optional), pick your Canvas's **frame
+   finish** (light wood, dark wood, black or white; used to draw the Review
+   preview, light wood by default), and set the crop sizes to your Canvas's
+   resolution.
 4. **Save**. Settings take effect immediately, without a restart, and choosing
    a different input album starts a sync.
 
@@ -259,6 +261,10 @@ meural:
 # How often to sync the input album, in minutes (0 = off)
 sync:
   interval_minutes: 15
+
+# The frame drawn around Review previews: light-wood, dark-wood, black or white
+display:
+  frame: light-wood
 ```
 
 ### Getting Immich API Key
@@ -275,7 +281,8 @@ sync:
 | `asset.upload` | Upload the rendered crops |
 | `albumAsset.create` | Add crops to the output album |
 | `albumAsset.delete` | Remove an image from the input album (Manage → Remove Original) |
-| `asset.delete` | Move the previous crop to the Immich trash when re-uploading |
+| `asset.delete` | Move a crop's old copy to the Immich trash when re-uploading it, skipping it or deleting it |
+| `face.read` (optional) | Start new crops on the people in the photo; without it they start centered |
 
 `asset.update` isn't needed: re-uploading a crop uploads a new asset and trashes
 the old one, since Immich v3 removed in-place replacement. Nothing is ever
@@ -307,6 +314,8 @@ Settings lists your albums by name, so you only need IDs when editing
    - Previously cropped images show status indicators
 
 3. **Create Portrait Crop**
+   - The crop starts as large as possible, centered on the people Immich found
+     in the photo (with the optional `face.read` permission), or on the middle
    - Adjust the crop rectangle by dragging corners or edges
    - The aspect ratio is automatically maintained at 9:16
    - Below the image, the app shows how many of the original's pixels the crop
@@ -320,7 +329,8 @@ Settings lists your albums by name, so you only need IDs when editing
    - Click "Crop and Continue" to save the landscape crop
 
 5. **Review and Upload**
-   - Preview both crops in the final review stage
+   - Preview both crops in the final review stage, framed like your Canvas
+   - Click a framed crop to go back and adjust it
    - Use "Preview on Meural" to test on your canvas devices
    - Click "Upload Crops" to save to Immich output album (crops already in
      Immich unchanged aren't sent again)
@@ -335,6 +345,7 @@ Settings lists your albums by name, so you only need IDs when editing
 
 #### Batch Operations
 - Open Manage (top right) for Sync, which downloads new and changed photos from the input album, and Upload All, which renders and uploads every crop that is new or changed since its last upload (or was uploaded at a different size). Manage's Re-upload sends one crop again regardless
+- Skipping or deleting a crop that is already in Immich moves its copy in the output album to the Immich trash (the app asks first). Sync also checks the output album: a crop whose copy was deleted there shows as needing upload again
 - Filter view to show only unprocessed images; the count beside the switch shows how many are listed
 - Progress shows on the Sync and Upload All buttons, and the Manage icon spins while either runs
    - Review, Meural previews and uploads share the same rendered JPEG cache

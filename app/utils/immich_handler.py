@@ -12,6 +12,40 @@ from utils.file_handler import image_lock, remove_cached_image, write_json_atomi
 
 
 ALBUM_PAGE_SIZE = 1000  # the most Immich returns per search page
+FACE_RECHECK_SECONDS = 24 * 3600  # how often to ask again about a photo with no faces yet
+
+
+def face_boxes(faces):
+    """Faces from Immich's /faces, as [left, top, right, bottom] fractions of the upright image.
+
+    Uses the faces of people who aren't hidden; unassigned faces (often
+    passers-by) count only when there are none.
+    """
+    faces = [face for face in faces if isinstance(face, dict)]
+    people = [face for face in faces if isinstance(face.get('person'), dict) and not face['person'].get('isHidden')]
+    boxes = []
+    for face in people or [face for face in faces if not face.get('person')]:
+        try:
+            width, height = face['imageWidth'], face['imageHeight']
+            box = (face['boundingBoxX1'] / width, face['boundingBoxY1'] / height,
+                   face['boundingBoxX2'] / width, face['boundingBoxY2'] / height)
+        except (KeyError, TypeError, ZeroDivisionError):
+            continue
+        boxes.append([round(min(max(value, 0.0), 1.0), 4) for value in box])
+    return boxes
+
+
+def faces_stale(metadata, now=None):
+    """True when the cached face list is missing, or empty and not checked recently."""
+    if 'faces' not in metadata:
+        return True
+    if metadata['faces']:
+        return False
+    try:
+        checked = datetime.fromisoformat(metadata.get('faces_at') or '')
+    except ValueError:
+        return True
+    return ((now or datetime.now(timezone.utc)) - checked).total_seconds() >= FACE_RECHECK_SECONDS
 
 
 class ImmichHandler:
@@ -26,6 +60,7 @@ class ImmichHandler:
         self.input_album_id = settings.get("input_album_id") or ""
         self.output_album_id = settings.get("output_album_id") or ""
         self.headers = {"x-api-key": self.api_key, "Accept": "application/json"}
+        self.faces_denied = False  # the key lacks face.read; don't ask again until it changes
 
 
     def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
@@ -143,6 +178,29 @@ class ImmichHandler:
         path = os.path.join(os.path.dirname(file_path), '.metadata', f'{asset_id}.json')
         write_json_atomic(path, metadata)
 
+    def refresh_faces(self, asset_id, metadata_path, metadata):
+        """Store the faces Immich found in a cached image; a failure leaves the cache as it was.
+
+        Needs the key's face.read permission, which is optional: without it new
+        crops simply start centered.
+        """
+        if self.faces_denied:
+            return
+        try:
+            faces = self._make_request('GET', '/faces', params={'id': asset_id})
+            if not isinstance(faces, list):
+                raise ValueError('Invalid Immich faces response')
+            write_json_atomic(metadata_path, {**metadata, 'faces': face_boxes(faces),
+                                              'faces_at': datetime.now(timezone.utc).isoformat()})
+        except requests.HTTPError as error:
+            if error.response is not None and error.response.status_code in (401, 403):
+                self.faces_denied = True
+                logging.warning('The Immich API key lacks face.read; new crops start centered instead of on faces')
+            else:
+                logging.warning('Could not fetch faces for %s: %s', asset_id, error)
+        except Exception as error:
+            logging.warning('Could not fetch faces for %s: %s', asset_id, error)
+
     def upload_asset(self, content: bytes, filename: str, album_id: str,
                      replaces: Optional[str] = None, resume=None, checkpoint=None) -> str:
         """Upload, attach and retire the old copy, checkpointing each remote step.
@@ -257,6 +315,8 @@ class ImmichHandler:
                         raise RuntimeError(path or 'Could not download source image')
                     with open(os.path.join(metadata_dir, f'{asset_id}.json')) as f:
                         cached = json.load(f)
+                if faces_stale(cached):
+                    self.refresh_faces(asset_id, os.path.join(metadata_dir, f'{asset_id}.json'), cached)
                 return {'asset_id': asset_id, 'file_path': path,
                         'original_filename': cached.get('original_filename', '')}
 

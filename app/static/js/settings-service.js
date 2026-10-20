@@ -1,5 +1,5 @@
 /**
- * settings-service.js - Settings modal: Immich connection and albums, Meural devices, crop sizes
+ * settings-service.js - Settings modal: Immich connection and albums, Meural devices and frame, crop sizes
  *
  * The server never sends the saved API key back. Leaving the key blank keeps it,
  * but only for the saved URL; a new URL needs the key entered again.
@@ -33,7 +33,7 @@ function hideSettingsModal() {
 }
 
 function fillSettingsForm(settings, configured) {
-    const { immich, meural, dimensions, sync } = settings;
+    const { immich, meural, dimensions, sync, display } = settings;
     window.ELEMENTS.settingsWelcomeEl.hidden = configured;
     settingsField('url').value = immich.url;
     settingsField('api_key').value = '';
@@ -41,6 +41,7 @@ function fillSettingsForm(settings, configured) {
     for (const name of ['input_album_id', 'output_album_id']) setAlbumOptions(settingsField(name), [], immich[name]);
     setAlbumStatus('');
     settingsField('sync_interval').value = sync.interval_minutes;
+    settingsField('frame').value = display.frame;
     window.ELEMENTS.settingsDevicesEl.replaceChildren(...meural.devices.map(deviceRow));
     for (const orientation of ['portrait', 'landscape']) {
         const [width, height] = dimensions[`${orientation}_size`];
@@ -149,6 +150,7 @@ function readSettingsForm() {
         },
         meural: { devices },
         sync: { interval_minutes: number('sync_interval') },
+        display: { frame: settingsField('frame').value },
         dimensions: {
             portrait_size: [number('portrait_width'), number('portrait_height')],
             landscape_size: [number('landscape_width'), number('landscape_height')]
@@ -179,6 +181,7 @@ async function saveSettings(event) {
         save.disabled = false;
     }
     savedSettings = data.settings;
+    document.documentElement.dataset.frame = data.settings.display.frame;
     hideSettingsModal();
     showToast('Settings saved', 'success');
 

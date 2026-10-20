@@ -31,7 +31,9 @@ DEFAULT_SETTINGS = {
     "immich": {"url": "", "api_key": "", "input_album_id": "", "output_album_id": ""},
     "meural": {"devices": []},
     "sync": {"interval_minutes": 15},  # 0 turns scheduled syncs off
+    "display": {"frame": "light-wood"},  # the frame drawn around Review previews
 }
+FRAMES = ("light-wood", "dark-wood", "black", "white")  # the Meural Canvas II finishes
 ORIENTATIONS = ("portrait", "landscape")
 MAX_SIZE = 10000
 MAX_SYNC_INTERVAL = 1440  # minutes
@@ -138,8 +140,12 @@ def validate_settings(data):
     if not isinstance(interval, int) or isinstance(interval, bool) or not 0 <= interval <= MAX_SYNC_INTERVAL:
         raise ValueError(f"Sync interval must be 0-{MAX_SYNC_INTERVAL} minutes (0 turns it off)")
 
+    frame = (data.get("display") or {}).get("frame", DEFAULT_SETTINGS["display"]["frame"])
+    if frame not in FRAMES:
+        raise ValueError(f"Frame must be one of: {', '.join(FRAMES)}")
+
     return {"dimensions": sizes, "immich": {**login, **albums}, "meural": {"devices": devices},
-            "sync": {"interval_minutes": interval}}
+            "sync": {"interval_minutes": interval}, "display": {"frame": frame}}
 
 
 def save_settings(new):

@@ -185,6 +185,10 @@ async function syncWithImmich() {
     }
     try {
         result = await runJob('sync', job => { if (button) button.textContent = progressLabel('Syncing', job); });
+        if (result?.reuploads) {
+            showToast(`${result.reuploads} image${result.reuploads === 1 ? ' has crops' : 's have crops'} no longer in Immich; ` +
+                'they need uploading again', 'info');
+        }
     } catch (error) {
         showToast('Error syncing with Immich: ' + error.message, 'error');
         throw error;

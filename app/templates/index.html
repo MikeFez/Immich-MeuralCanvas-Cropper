@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-frame="{{ frame }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -111,19 +111,21 @@
                             <div class="frame-preview-container">
                                 <div class="frame-preview-item" id="portrait-preview">
                                     <div class="frame-label">Portrait (1080×1920)</div>
-                                    <div class="photo-frame">
-                                        <div class="frame-mat">
+                                    <button type="button" class="photo-frame" data-stage="1" title="Adjust the portrait crop">
+                                        <span class="frame-mat">
                                             <img id="portrait-preview-img" src="" alt="Portrait crop">
-                                        </div>
-                                    </div>
+                                        </span>
+                                        <span class="frame-edit-hint"><i class="fas fa-crop-alt"></i> Adjust crop</span>
+                                    </button>
                                 </div>
                                 <div class="frame-preview-item" id="landscape-preview">
                                     <div class="frame-label">Landscape (1920×1080)</div>
-                                    <div class="photo-frame">
-                                        <div class="frame-mat">
+                                    <button type="button" class="photo-frame" data-stage="2" title="Adjust the landscape crop">
+                                        <span class="frame-mat">
                                             <img id="landscape-preview-img" src="" alt="Landscape crop">
-                                        </div>
-                                    </div>
+                                        </span>
+                                        <span class="frame-edit-hint"><i class="fas fa-crop-alt"></i> Adjust crop</span>
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -289,6 +291,16 @@
 
                 <section class="settings-section">
                     <h3>Meural devices</h3>
+                    <div class="settings-frame">
+                        <label class="form-label" for="settings-frame">Frame finish</label>
+                        <select id="settings-frame" name="frame" class="form-select">
+                            <option value="light-wood">Light wood</option>
+                            <option value="dark-wood">Dark wood</option>
+                            <option value="black">Black</option>
+                            <option value="white">White</option>
+                        </select>
+                        <div class="form-text">The frame drawn around your crops on the Review step.</div>
+                    </div>
                     <div id="settings-devices" class="settings-devices"></div>
                     <button type="button" name="add_device" class="btn btn-sm btn-outline-secondary">
                         <i class="fas fa-plus"></i> Add device
