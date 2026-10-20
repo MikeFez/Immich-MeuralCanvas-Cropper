@@ -6,6 +6,7 @@ from utils.http_client import HttpClient
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional
 import logging
+import threading
 from datetime import datetime, timezone
 from PIL import Image
 from utils.file_handler import image_lock, remove_cached_image, write_json_atomic
@@ -60,11 +61,19 @@ class ImmichHandler:
         self.input_album_id = settings.get("input_album_id") or ""
         self.output_album_id = settings.get("output_album_id") or ""
         self.headers = {"x-api-key": self.api_key, "Accept": "application/json"}
-        self.faces_denied = False  # the key lacks face.read; don't ask again until it changes
+        # Whether the key has face.read: None until a sync asks, which it does
+        # once per sync, so adding the permission in Immich takes effect.
+        self.faces_allowed = None
+        self.faces_lock = threading.Lock()
+        self.faces_warned = False
 
 
-    def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
-        """Make an HTTP request to the Immich API"""
+    def _make_request(self, method: str, endpoint: str, quiet_statuses=(), **kwargs) -> Dict[str, Any]:
+        """Make an HTTP request to the Immich API.
+
+        Errors with a status in quiet_statuses are expected (the caller handles
+        them), so they are raised without being logged as failures.
+        """
         if not self.base_url or not self.api_key:
             raise RuntimeError("Immich is not configured; open Settings")
         url = f"{self.base_url}/api{endpoint}"
@@ -74,7 +83,7 @@ class ImmichHandler:
             response = self.http.session().request(method, url, headers=self.headers, **kwargs)
 
             # Log response content for debugging when there's an error
-            if not response.ok:
+            if not response.ok and response.status_code not in quiet_statuses:
                 logging.error(f"Error response: {response.text}")
 
             response.raise_for_status()
@@ -88,6 +97,8 @@ class ImmichHandler:
                     return {"content": response.content}
             return {}
         except requests.exceptions.RequestException as e:
+            if getattr(e.response, "status_code", None) in quiet_statuses:
+                raise
             logging.error(
                 f"Immich API request failed ({e.__class__.__name__}): {str(e)}"
             )
@@ -184,18 +195,31 @@ class ImmichHandler:
         Needs the key's face.read permission, which is optional: without it new
         crops simply start centered.
         """
-        if self.faces_denied:
-            return
+        if self.faces_allowed is None:
+            # Until the permission is known, one request at a time: a missing
+            # face.read costs a single refused request per sync.
+            with self.faces_lock:
+                if self.faces_allowed is None:
+                    self._fetch_faces(asset_id, metadata_path, metadata)
+                    return
+        if self.faces_allowed:
+            self._fetch_faces(asset_id, metadata_path, metadata)
+
+    def _fetch_faces(self, asset_id, metadata_path, metadata):
         try:
-            faces = self._make_request('GET', '/faces', params={'id': asset_id})
+            faces = self._make_request('GET', '/faces', params={'id': asset_id}, quiet_statuses=(401, 403))
             if not isinstance(faces, list):
                 raise ValueError('Invalid Immich faces response')
+            self.faces_allowed = True
             write_json_atomic(metadata_path, {**metadata, 'faces': face_boxes(faces),
                                               'faces_at': datetime.now(timezone.utc).isoformat()})
         except requests.HTTPError as error:
             if error.response is not None and error.response.status_code in (401, 403):
-                self.faces_denied = True
-                logging.warning('The Immich API key lacks face.read; new crops start centered instead of on faces')
+                self.faces_allowed = False
+                if not self.faces_warned:
+                    self.faces_warned = True
+                    logging.warning('The Immich API key lacks face.read, so new crops start centered '
+                                    'instead of on faces; each sync checks again')
             else:
                 logging.warning('Could not fetch faces for %s: %s', asset_id, error)
         except Exception as error:
@@ -269,6 +293,8 @@ class ImmichHandler:
         called as each one finishes.
         """
         assets = self.get_album_assets(self.input_album_id)
+        if self.faces_allowed is False:
+            self.faces_allowed = None  # ask again, in case face.read was added
         if any(not isinstance(asset, dict) or not asset.get('id') for asset in assets):
             raise ValueError('Invalid source album asset')
         assets = [asset for asset in assets if asset.get('type', 'IMAGE') == 'IMAGE']

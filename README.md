@@ -282,7 +282,7 @@ display:
 | `albumAsset.create` | Add crops to the output album |
 | `albumAsset.delete` | Remove an image from the input album (Manage → Remove Original) |
 | `asset.delete` | Move a crop's old copy to the Immich trash when re-uploading it, skipping it or deleting it |
-| `face.read` (optional) | Start new crops on the people in the photo; without it they start centered |
+| `face.read` (optional) | Start new crops on the people in the photo. Without it new crops start centered and everything else works; if you add it later, the next sync picks it up |
 
 `asset.update` isn't needed: re-uploading a crop uploads a new asset and trashes
 the old one, since Immich v3 removed in-place replacement. Nothing is ever

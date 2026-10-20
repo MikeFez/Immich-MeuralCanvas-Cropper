@@ -42,6 +42,11 @@ class CropRegressionTests(unittest.TestCase):
         album.start()
         self.addCleanup(album.stop)
 
+    def enable_logging(self):
+        """Let this test see log records (the class silences them)."""
+        logging.disable(logging.NOTSET)
+        self.addCleanup(logging.disable, logging.CRITICAL)
+
     def save(self, both=True):
         self.assertTrue(self.files.save_crop(ASSET, 'portrait', PORTRAIT))
         if both:
@@ -387,23 +392,52 @@ class CropRegressionTests(unittest.TestCase):
              patch.object(handler, '_make_request', return_value=faces) as request:
             handler.sync_input_images(self.app.config.INPUT_FOLDER)
             handler.sync_input_images(self.app.config.INPUT_FOLDER)
-        request.assert_called_once_with('GET', '/faces', params={'id': ASSET})
+        request.assert_called_once_with('GET', '/faces', params={'id': ASSET}, quiet_statuses=(401, 403))
         self.assertEqual(self.image()['faces'], [[0.0, 0.0, 0.25, 0.5]])
         now = datetime.now(timezone.utc)
         self.assertFalse(faces_stale({'faces': [], 'faces_at': (now - timedelta(hours=1)).isoformat()}, now))
         self.assertTrue(faces_stale({'faces': [], 'faces_at': (now - timedelta(days=2)).isoformat()}, now))
 
-    def test_missing_face_permission_is_asked_once_and_keeps_the_cache(self):
+    def test_missing_face_permission_costs_one_quiet_request_per_sync(self):
         handler = self.app.immich_handler
-        self.addCleanup(setattr, handler, 'faces_denied', False)
-        response = Mock(status_code=403)
-        denied = self.app.requests.HTTPError('403', response=response)
-        with patch.object(handler, 'get_album_assets', return_value=[{'id': ASSET}]), \
-             patch.object(handler, '_make_request', side_effect=denied) as request:
-            self.assertEqual(len(handler.sync_input_images(self.app.config.INPUT_FOLDER)), 1)
+        self.addCleanup(handler.configure, self.app.config.settings['immich'])
+        self.enable_logging()
+        ids = [ASSET] + [f'{n}{n}{n}{n}{n}{n}{n}{n}-0000-4000-8000-000000000000' for n in range(2, 8)]
+        for asset in ids[1:]:
+            seed_image(self.app, asset)
+        denied = self.app.requests.HTTPError('403', response=Mock(status_code=403))
+        album = [{'id': asset} for asset in ids]
+        with patch.object(handler, 'get_album_assets', return_value=album), \
+             patch.object(handler, '_make_request', side_effect=denied) as request, \
+             self.assertLogs(level='WARNING') as logs:
+            self.assertEqual(len(handler.sync_input_images(self.app.config.INPUT_FOLDER)), len(ids))
+            self.assertEqual(request.call_count, 1)
+            request.assert_called_with('GET', '/faces', params={'id': request.call_args.kwargs['params']['id']},
+                                       quiet_statuses=(401, 403))
             handler.sync_input_images(self.app.config.INPUT_FOLDER)
-        request.assert_called_once()
+            self.assertEqual(request.call_count, 2)
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn('face.read', logs.output[0])
         self.assertEqual(self.image()['faces'], [])
+        # Once the permission is added, the next sync fetches every image's faces.
+        with patch.object(handler, 'get_album_assets', return_value=album), \
+             patch.object(handler, '_make_request', return_value=[]) as request:
+            handler.sync_input_images(self.app.config.INPUT_FOLDER)
+        self.assertEqual(request.call_count, len(ids))
+
+    def test_expected_errors_are_not_logged_as_failures(self):
+        handler = self.app.immich_handler
+        self.enable_logging()
+        response = Mock(ok=False, status_code=403, text='Missing required permission: face.read')
+        response.raise_for_status.side_effect = self.app.requests.HTTPError('403', response=response)
+        with patch.object(handler.http, 'session') as session, self.assertNoLogs(level='ERROR'):
+            session.return_value.request.return_value = response
+            with self.assertRaises(self.app.requests.HTTPError):
+                handler._make_request('GET', '/faces', quiet_statuses=(403,))
+        with patch.object(handler.http, 'session') as session, self.assertLogs(level='ERROR'):
+            session.return_value.request.return_value = response
+            with self.assertRaises(self.app.requests.HTTPError):
+                handler._make_request('GET', '/faces')
 
     def test_trash_helper_passes_correct_method_endpoint_and_json(self):
         with patch.object(self.app.immich_handler, '_make_request', return_value={}) as request:
