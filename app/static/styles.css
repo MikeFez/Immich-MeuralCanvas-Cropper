@@ -20,7 +20,7 @@
     --warning: #8f5a00;
     --warning-soft: rgba(196, 135, 20, 0.16);
     --darkroom: #1a1a18;
-    --frame: #161615;
+    --frame: #b08968;
     --shadow-sm: 0 1px 2px rgba(30, 25, 15, 0.06), 0 1px 3px rgba(30, 25, 15, 0.08);
     --shadow-md: 0 4px 12px rgba(30, 25, 15, 0.1);
     --shadow-lg: 0 24px 60px rgba(20, 18, 12, 0.25);
@@ -52,7 +52,6 @@
         --warning: #e6b75c;
         --warning-soft: rgba(230, 183, 92, 0.14);
         --darkroom: #0b0b0a;
-        --frame: #050505;
         --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
         --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
         --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.6);
@@ -612,8 +611,8 @@ body {
 .photo-frame {
     background-color: var(--frame);
     border-radius: 3px;
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), 0 2px 4px rgba(0, 0, 0, 0.18), 0 14px 30px rgba(0, 0, 0, 0.22);
-    padding: min(12px, 3vw);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.1);
+    padding: min(15px, 3vw);
     transition: transform 0.3s ease;
     display: inline-block;
     max-width: 95%;
@@ -624,7 +623,8 @@ body {
 }
 
 .frame-mat {
-    background-color: #000000;
+    background-color: #ffffff;
+    padding: min(15px, 3vw);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -1375,7 +1375,8 @@ body {
     }
 
     .frame-label { font-size: 0.7rem; }
-    .photo-frame { padding: 6px; max-width: 100%; }
+    .photo-frame { padding: 8px; max-width: 100%; }
+    .frame-mat { padding: 8px; }
     .frame-mat img { max-width: 100%; max-height: 50dvh; }
 
     /* Buttons: the main action spans the bar, the rest share a row with icons above labels.
