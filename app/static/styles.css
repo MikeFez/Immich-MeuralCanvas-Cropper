@@ -1312,7 +1312,18 @@ body {
         padding-bottom: max(10px, env(safe-area-inset-bottom));
     }
 
-    .image-grid-item { height: auto; aspect-ratio: 1; }
+    /* The grid's height is fixed by the screen, and cards clip (overflow: hidden), so their
+       minimum height counts as zero; rows must be content-sized or a long library squashes
+       them to fit instead of scrolling. */
+    .image-grid-container { grid-auto-rows: max-content; }
+    .image-grid-item { height: auto; }
+    .thumbnail-container { flex: none; aspect-ratio: 1; }
+
+    .thumbnail-image {
+        position: absolute;
+        inset: 0;
+    }
+
     .image-name { font-size: 11px; }
 
     /* Editor: the photo runs edge to edge. */

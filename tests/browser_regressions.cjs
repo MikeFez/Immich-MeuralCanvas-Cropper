@@ -311,6 +311,15 @@ const second = '22222222-2222-4222-8222-222222222222';
         assert.ok(await phone.locator('.sidebar').isVisible());
         assert.equal(await phone.locator('#editor-view').isVisible(), false);
         assert.equal(await phone.evaluate(() => window.APP_STATE.currentImage), null);
+        // A library longer than the screen scrolls; its cards keep their size rather than squashing.
+        const card = await phone.evaluate(() => {
+            const grid = window.ELEMENTS.imageGridEl;
+            const first = grid.querySelector('.image-grid-item');
+            for (let i = 0; i < 150; i++) grid.append(first.cloneNode(true));
+            const { width, height } = first.getBoundingClientRect();
+            return { width, height, scrolls: grid.scrollHeight > grid.clientHeight };
+        });
+        assert.ok(card.scrolls && card.height > card.width, JSON.stringify(card));
         await phoneContext.close();
         console.log('PASS: phones switch between the library and a full-screen editor');
 
