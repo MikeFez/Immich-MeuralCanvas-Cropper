@@ -41,7 +41,7 @@ A comprehensive web application designed to seamlessly crop images from Immich f
 ### Meural Canvas Integration
 - **Live Preview**: Send crops directly to Meural Canvas for preview
 - **Multi-Device Support**: Configure multiple Meural Canvas devices
-- **Automatic Upload**: Batch upload completed crops to Meural Canvas
+- **Framed Review**: See each crop in a frame matching your Canvas's finish before uploading
 
 ### User Interface
 - **Responsive Design**: Works on desktop, tablet, and mobile devices, with a touch-friendly phone layout
@@ -337,18 +337,16 @@ Settings lists your albums by name, so you only need IDs when editing
 
 ### Advanced Features
 
-#### Keyboard Shortcuts
-- **Arrow Keys**: Fine-tune crop position
-- **Shift + Arrow**: Resize crop rectangle
-- **Enter**: Proceed to next stage
-- **Escape**: Cancel current operation
+#### Keyboard
+The crop editor is mouse and touch only. In dialogs, **Enter** confirms and
+**Escape** cancels; **Escape** also closes Manage and Settings.
 
 #### Batch Operations
 - Open Manage (top right) for Sync, which downloads new and changed photos from the input album, and Upload All, which renders and uploads every crop that is new or changed since its last upload (or was uploaded at a different size). Manage's Re-upload sends one crop again regardless
 - Skipping or deleting a crop that is already in Immich moves its copy in the output album to the Immich trash (the app asks first). Sync also checks the output album: a crop whose copy was deleted there shows as needing upload again
 - Filter view to show only unprocessed images; the count beside the switch shows how many are listed
 - Progress shows on the Sync and Upload All buttons, and the Manage icon spins while either runs
-   - Review, Meural previews and uploads share the same rendered JPEG cache
+- Review, Meural previews and uploads share the same rendered JPEG cache
 
 #### Background Activity and Recovery
 Manage includes **Recent activity**, with counts, elapsed time and per-image
@@ -401,6 +399,7 @@ All persistent state lives in one file, **`/config/crops/metadata.json`**:
         "uploaded": {
           "asset_id": "<uploaded-immich-asset-id>",
           "crop": { "x": 720, "y": 100, "width": 863, "height": 1537 },
+          "size": [1080, 1920],
           "at": "2026-10-17T19:52:38+00:00"
         }
       },
@@ -413,11 +412,15 @@ All persistent state lives in one file, **`/config/crops/metadata.json`**:
 ```
 
 - `crop` is the saved selection in upright source-image pixels.
-- `uploaded` records the selection that was last uploaded to Immich. An image is
-  **completed** when every saved selection matches its upload record, so
-  re-cropping after an upload marks the image as pending again.
-- Deleting a crop keeps its upload record so a later upload still replaces the
-  previous copy.
+- `uploaded` records the selection and output size last uploaded to Immich. An
+  image is **completed** when every saved selection matches its upload record,
+  so re-cropping after an upload (or changing the crop size) marks the image as
+  pending again.
+- Skipping or deleting an uploaded crop trashes its copy in the output album
+  and removes the record. Sync removes records whose copy is no longer in the
+  output album, so those crops count as not uploaded.
+- An upload interrupted partway keeps a `pending_upload` checkpoint until it
+  finishes (see [Background Activity and Recovery](#background-activity-and-recovery)).
 - Older installs that used `progress.json` and bare coordinates are migrated
   automatically on startup; the old file is renamed to `progress.json.migrated`.
 
@@ -456,13 +459,13 @@ endpoints take `{"identifier": "<asset-id>", ...}` and respond with the updated
 `image` record; errors are JSON `{"success": false, "error": "..."}`.
 
 ### Images
-- `GET /images`: cached source images with `crops` and `status`
+- `GET /images`: cached source images with `crops`, `uploaded` (per orientation), `faces` and `status`
 - `GET /image/{asset_id}`: source image
 - `GET /editor-image/{asset_id}`: cached upright editor preview, up to 2048px
 - `GET /thumbnail/{asset_id}`: 320px thumbnail
 - `GET /output/{orientation}/{asset_id}`: saved crop rendered at frame size
 - `POST /crop`: save a crop (`orientation`, `crop`)
-- `DELETE /crop-data/{asset_id}/{orientation}`: delete one saved crop
+- `DELETE /crop-data/{asset_id}/{orientation}`: delete one saved crop, trashing its uploaded copy
 - `POST /reset`: delete both saved crops
 
 ### Immich
@@ -470,12 +473,13 @@ endpoints take `{"identifier": "<asset-id>", ...}` and respond with the updated
 - `POST /complete`: upload an image's saved crops that aren't already in Immich
 - `POST /upload-single`: upload one orientation (`orientation`)
 - `POST /upload-all`: start uploading every new or changed crop (background job)
-- `GET /settings`: current settings, without the API key (`has_api_key` instead), and `configured`
+- `GET /settings`: current settings (Immich, Meural devices, crop sizes, sync interval, frame finish), without the API key (`has_api_key` instead), and `configured`
 - `PUT /settings`: validate, save and apply settings; a blank `immich.api_key` keeps the saved key for the saved URL
 - `POST /settings/albums`: list albums for a `url` and `api_key` before saving (same blank-key rule)
 - `GET /jobs`: the running job, if any, and `last_sync`, the ID of the last completed sync
   (the UI polls this to refresh after scheduled syncs)
 - `GET /jobs/{id}`: job status and progress (`status`, `done`, `total`, `result`, `error`).
+  A sync's `result` includes `reuploads`: images whose uploaded copy was gone from the output album.
   Starting a job while another runs returns 409 with the running job.
 - `GET /jobs` also includes recent `history`; jobs include `elapsed_seconds`,
   per-image `errors`, `remaining_assets` and `cancel_requested`. A job that was
@@ -507,8 +511,13 @@ endpoints take `{"identifier": "<asset-id>", ...}` and respond with the updated
 │       ├── immich_handler.py    # Immich API integration
 │       ├── image_processor.py   # Image processing logic
 │       ├── meural_handler.py    # Meural Canvas integration
-│       └── file_handler.py     # File system operations
-├── config/                  # Configuration files
+│       ├── file_handler.py      # Crop/upload state and the source cache
+│       ├── jobs.py              # Background Sync and Upload All jobs
+│       ├── render_cache.py      # Rendered crop and preview cache
+│       └── http_client.py       # Per-thread HTTP sessions
+├── tests/                   # Backend and browser regression tests
+├── docs/screenshots/        # README screenshots
+├── config/                  # Configuration (created on first run)
 └── Dockerfile              # Container configuration
 ```
 
@@ -562,20 +571,19 @@ python app.py
 - Ensure images are fully loaded before cropping
 
 ### Log Analysis
-Check application logs for detailed error information:
+The app logs to standard output; there is no log file:
 ```bash
-# Docker logs
+# Docker
 docker logs <container-name>
 
-# Manual installation
-tail -f /path/to/app/logs/application.log
+# Manual installation: the terminal running python app.py
 ```
 
 ### Performance Optimization
 - Use SSD storage for image processing
 - Ensure adequate RAM for large images
 - Consider image size limits for very large files
-- Flask's threaded mode handles multiple concurrent requests efficiently
+- Waitress serves requests on 8 threads in a single process
 - Optimized for small-scale self-hosted deployments
 
 ## 🤝 Contributing
@@ -589,7 +597,7 @@ tail -f /path/to/app/logs/application.log
 
 ### Code Style
 - Follow PEP 8 for Python code
-- Use ESLint for JavaScript
+- Plain JavaScript with no build step; CI checks syntax with `node --check`
 - Include docstrings for all functions
 - Add comments for complex logic
 
