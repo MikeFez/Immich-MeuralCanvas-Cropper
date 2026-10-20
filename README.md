@@ -2,9 +2,17 @@
 
 A comprehensive web application designed to seamlessly crop images from Immich for optimal display on Meural Canvas digital frames. This tool provides an intuitive interface for creating perfectly sized portrait (1080×1920) and landscape (1920×1080) crops that maintain aspect ratios and image quality.
 
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/editor-dark.webp">
+  <img src="docs/screenshots/editor-light.webp" alt="The crop editor: an image library beside a portrait crop of a lakeside sunset">
+</picture>
+</p>
+
 ## 📋 Table of Contents
 
 - [Features](#features)
+- [Screenshots](#screenshots)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Configuration](#configuration)
@@ -36,10 +44,38 @@ A comprehensive web application designed to seamlessly crop images from Immich f
 - **Automatic Upload**: Batch upload completed crops to Meural Canvas
 
 ### User Interface
-- **Responsive Design**: Works on desktop, tablet, and mobile devices
+- **Responsive Design**: Works on desktop, tablet, and mobile devices, with a touch-friendly phone layout
+- **Light and Dark Themes**: Follows your system setting
 - **Landing Page**: Welcome screen when no image is selected
 - **Progress Tracking**: Visual indicators for processing status
 - **Error Handling**: Comprehensive error messages and recovery
+
+## 📸 Screenshots
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/review-dark.webp">
+  <img src="docs/screenshots/review-light.webp" alt="Review step: the portrait and landscape crops shown in Meural-style frames" width="49%">
+</picture>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/manage-dark.webp">
+  <img src="docs/screenshots/manage-light.webp" alt="Manage: each original beside its portrait and landscape crops, with actions" width="49%">
+</picture>
+</p>
+<p align="center"><sub>Review both crops before uploading &nbsp;·&nbsp; Manage, re-crop or re-upload anything you've processed</sub></p>
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/phone-library-dark.webp">
+  <img src="docs/screenshots/phone-library-light.webp" alt="The image library on a phone" width="260">
+</picture>
+&nbsp;&nbsp;
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/phone-editor-dark.webp">
+  <img src="docs/screenshots/phone-editor-light.webp" alt="Cropping on a phone" width="260">
+</picture>
+</p>
+<p align="center"><sub>On a phone the library and the editor each take the full screen. Light and dark themes follow your system setting.</sub></p>
 
 ## 🔧 Prerequisites
 
