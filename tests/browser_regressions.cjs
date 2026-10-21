@@ -143,6 +143,11 @@ const second = '22222222-2222-4222-8222-222222222222';
         await page.locator('#btn-manage').click();
         assert.equal(await page.locator(`tr[data-identifier="${asset}"] img`).first().getAttribute('alt'), hostileName);
         assert.equal(await page.locator(`tr[data-identifier="${asset}"] [onclick]`).count(), 0);
+        // Removing from the input album says plainly that nothing is deleted.
+        await page.locator(`tr[data-identifier="${asset}"] .remove-from-album`).click();
+        assert.match(await page.locator('.confirm-dialog').innerText(), /Nothing is deleted/);
+        await page.keyboard.press('Escape');
+        assert.equal(await page.locator('#manage-modal .job-history').count(), 0);
         assert.equal(await page.evaluate(() => !!window.filenameExecuted), false);
         // Escape cancels a confirmation without closing the Manage modal behind it.
         await page.locator(`tr[data-identifier="${asset}"] .reupload`).click();
@@ -423,54 +428,6 @@ const second = '22222222-2222-4222-8222-222222222222';
         await scaled.close();
         console.log('PASS: smaller editor previews save, resize and restore crops in original pixels');
 
-        const activity = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-        activity.on('pageerror', error => errors.push(error.message));
-        const job = { id: 9001, kind: 'sync', status: 'running', done: 1, total: 2,
-            elapsed_seconds: 75, cancel_requested: false, errors: {}, remaining_assets: [second] };
-        let history = [job];
-        let cancelled = false;
-        const retries = [];
-        await activity.route('https://**', route => route.fulfill({ status: 200, body: '', contentType: 'text/css' }));
-        await activity.route('**/jobs', route => route.fulfill({ json: {
-            success: true, running: history.find(item => item.status === 'running') || null, history, last_sync: null
-        } }));
-        await activity.route('**/jobs/9001/cancel', route => {
-            cancelled = true;
-            Object.assign(job, { status: 'cancelled', cancel_requested: true });
-            return route.fulfill({ json: { success: true, job } });
-        });
-        await activity.route('**/jobs/*/retry', route => {
-            retries.push(new URL(route.request().url()).pathname);
-            const done = { ...job, id: 9002, status: 'done', done: 1, total: 1,
-                cancel_requested: false, errors: {}, remaining_assets: [], result: { images: 1 } };
-            history = [done, ...history];
-            return route.fulfill({ status: 202, json: { success: true, job: done } });
-        });
-        await activity.goto(baseURL);
-        await activity.waitForFunction(() => window.APP_STATE?.initialized);
-        await activity.locator('#btn-manage').click();
-        const row = activity.locator('[data-job-id="9001"]');
-        assert.match(await row.innerText(), /1\/2 · 1m 15s/);
-        await row.getByRole('button', { name: 'Cancel', exact: true }).click();
-        await row.getByRole('button', { name: 'Retry unfinished' }).waitFor();
-        assert.ok(cancelled);
-        await row.getByRole('button', { name: 'Retry unfinished' }).click();
-        await activity.waitForFunction(() => !syncInProgress);
-        assert.deepEqual(retries, ['/jobs/9001/retry']);
-        await activity.reload();
-        await activity.waitForFunction(() => window.APP_STATE?.initialized);
-        await activity.locator('#btn-manage').click();
-        assert.ok(await activity.locator('[data-job-id="9002"]').isVisible());
-        history = [{ ...job, id: 9003, kind: 'upload-all', status: 'done', cancel_requested: false,
-            errors: { [second]: '<img src=x onerror="window.jobErrorExecuted=true">' } }, ...history];
-        await activity.evaluate(() => watchBackgroundJobs());
-        const failed = activity.locator('[data-job-id="9003"]');
-        assert.ok(await failed.getByRole('button', { name: 'Retry failed', exact: true }).isVisible());
-        await failed.locator('summary').click();
-        assert.ok((await failed.locator('li').innerText()).includes('<img src=x'));
-        assert.equal(await failed.locator('img').count(), 0);
-        await activity.close();
-        console.log('PASS: Manage shows elapsed time, cancellation, retry, history and safe per-image errors');
 
         assert.deepEqual(errors, []);
         assert.deepEqual(dialogs, [], 'native alert/confirm dialogs are not used');

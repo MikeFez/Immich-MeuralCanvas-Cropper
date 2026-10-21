@@ -103,7 +103,9 @@ function createManageTableRow(image) {
     const info = makeElement('div', 'manage-image-info');
     info.append(makeElement('div', 'manage-image-filename', truncateFilename(name, 25)));
     const actions = makeElement('div', 'manage-image-actions');
-    actions.append(manageButton('delete-original', 'Remove Original', button => deleteOriginalImage(identifier, button)));
+    const remove = manageButton('remove-from-album', 'Remove from album', button => removeFromInputAlbum(identifier, button));
+    remove.title = 'Take this photo out of the input album. It stays in your Immich library.';
+    actions.append(remove);
     cell.append(preview, info, actions);
     original.append(cell);
     row.append(original);
@@ -198,12 +200,13 @@ function recropImage(identifier, orientation) {
 }
 
 /**
- * Delete original image from source album
+ * Take an image out of the input album; the photo itself stays in Immich
  */
-async function deleteOriginalImage(identifier, button) {
+async function removeFromInputAlbum(identifier, button) {
     const confirmed = await confirmDialog(
-        'Remove this image from the source album? The original photo will remain in your Immich library.',
-        'Remove', true
+        'Take this photo out of the input album? Nothing is deleted: the photo stays in your Immich library, ' +
+        'and crops already uploaded stay in the output album.',
+        'Remove from album'
     );
 
     if (!confirmed) return;
@@ -212,7 +215,7 @@ async function deleteOriginalImage(identifier, button) {
     try {
         // Show loading state
         if (button) button.disabled = true;
-        if (button) button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+        if (button) button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Removing…';
 
         await postJSON('/delete-original', { identifier }, 'DELETE');
         document.querySelector(`tr[data-identifier="${identifier}"]`)?.remove();
@@ -222,10 +225,10 @@ async function deleteOriginalImage(identifier, button) {
             window.APP_STATE.currentImage = null;
             showView('no-image-view');
         }
-        showToast('Removed from source album', 'success');
+        showToast('Removed from the input album', 'success');
     } catch (error) {
-        console.error('Error deleting original image:', error);
-        showToast(`Error deleting original image: ${error.message}`, 'error');
+        console.error('Error removing image from the input album:', error);
+        showToast(`Could not remove from the input album: ${error.message}`, 'error');
     } finally {
         // Reset button state
         if (button) {

@@ -280,7 +280,7 @@ display:
 | `asset.download` | Download originals into the cache |
 | `asset.upload` | Upload the rendered crops |
 | `albumAsset.create` | Add crops to the output album |
-| `albumAsset.delete` | Remove an image from the input album (Manage → Remove Original) |
+| `albumAsset.delete` | Take an image out of the input album (Manage → Remove from album); the photo itself stays in Immich |
 | `asset.delete` | Move a crop's old copy to the Immich trash when re-uploading it, skipping it or deleting it |
 | `face.read` (optional) | Start new crops on the people in the photo. Without it new crops start centered and everything else works; if you add it later, the next sync picks it up |
 
@@ -348,16 +348,10 @@ The crop editor is mouse and touch only. In dialogs, **Enter** confirms and
 - Progress shows on the Sync and Upload All buttons, and the Manage icon spins while either runs
 - Review, Meural previews and uploads share the same rendered JPEG cache
 
-#### Background Activity and Recovery
-Manage includes **Recent activity**, with counts, elapsed time and per-image
-errors for Sync and Upload All. **Cancel** stops new images from starting;
-in-flight downloads or uploads finish first, and completed work is kept.
-**Retry failed** processes only failed images. Cancelled jobs and jobs
-interrupted by a restart offer **Retry unfinished**, which also includes images
-that had not started. If a job failed before it could list its images, retry
-repeats album discovery. Retries use current saved crop selections. After
-changing Immich server or album settings, start a new job instead of retrying
-an old one.
+#### Recovery
+If Sync or Upload All fails partway, a message says how many images failed;
+press the button again to finish. Sync only downloads what is missing or
+changed, and Upload All only sends crops that aren't in Immich yet.
 
 Upload checkpoints are saved after the image reaches Immich, after it is added
 to the output album, and after the previous version is trashed. A retry resumes
@@ -420,7 +414,7 @@ All persistent state lives in one file, **`/config/crops/metadata.json`**:
   and removes the record. Sync removes records whose copy is no longer in the
   output album, so those crops count as not uploaded.
 - An upload interrupted partway keeps a `pending_upload` checkpoint until it
-  finishes (see [Background Activity and Recovery](#background-activity-and-recovery)).
+  finishes (see [Recovery](#recovery)).
 - Older installs that used `progress.json` and bare coordinates are migrated
   automatically on startup; the old file is renamed to `progress.json.migrated`.
 

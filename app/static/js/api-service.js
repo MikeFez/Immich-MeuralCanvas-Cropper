@@ -8,7 +8,6 @@
 let syncInProgress = false;
 let uploadInProgress = false;
 let lastSyncSeen;  // ID of the sync the image list reflects
-let jobHistory = [];
 let lastJobChange;
 
 /**
@@ -27,13 +26,11 @@ async function runJob(kind, onProgress) {
 async function followJob(job, onProgress) {
     while (job.status === 'running') {
         onProgress?.(job);
-        renderJobHistory([job, ...jobHistory.filter(item => item.id !== job.id)]);
         await new Promise(resolve => setTimeout(resolve, 500));
         const poll = await fetch(`/jobs/${job.id}`);
-        if (!poll.ok) throw new Error(`Lost track of job ${job.id}; check Recent activity`);
+        if (!poll.ok) throw new Error(`Lost track of job ${job.id}`);
         job = (await poll.json()).job;
     }
-    renderJobHistory([job, ...jobHistory.filter(item => item.id !== job.id)]);
     if (job.status === 'failed' || job.status === 'interrupted') throw new Error(job.error || `${job.kind} failed`);
     if (job.status === 'cancelled') {
         showToast('Job cancelled. Completed images were kept.', 'info');
@@ -41,100 +38,6 @@ async function followJob(job, onProgress) {
     }
     return job.result;
 }
-
-/** Keep controls stable while progress updates, including open error details. */
-function renderJobHistory(history) {
-    jobHistory = history;
-    const list = document.getElementById('job-history-list');
-    if (!list) return;
-    if (!history.length) {
-        list.textContent = 'No background jobs yet.';
-        return;
-    }
-    if (!list.querySelector('[data-job-id]')) list.replaceChildren();
-    const existing = new Map(Array.from(list.children).map(row => [Number(row.dataset.jobId), row]));
-    for (const job of history) {
-        let row = existing.get(job.id);
-        if (!row) {
-            row = makeElement('div', 'job-row');
-            row.dataset.jobId = job.id;
-            const summary = makeElement('div', 'job-summary');
-            const actions = makeElement('div', 'job-actions');
-            const cancel = makeElement('button', 'btn btn-meural btn-secondary', 'Cancel');
-            const retry = makeElement('button', 'btn btn-meural btn-secondary', 'Retry failed');
-            cancel.addEventListener('click', async () => {
-                cancel.disabled = true;
-                try {
-                    await postJSON(`/jobs/${job.id}/cancel`, {});
-                    await watchBackgroundJobs();
-                } catch (error) { showToast(error.message, 'error'); cancel.disabled = false; }
-            });
-            retry.addEventListener('click', () => retryBackgroundJob(job.id));
-            actions.append(cancel, retry);
-            const details = makeElement('details', 'job-errors');
-            details.append(makeElement('summary', '', 'Image errors'), makeElement('ul'));
-            row.append(summary, actions, details);
-            list.append(row);
-        }
-        const seconds = Math.floor(job.elapsed_seconds || 0);
-        const elapsed = `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-        const errors = Object.entries(job.errors || {});
-        const status = job.cancel_requested && job.status === 'running' ? 'Stopping after current images' :
-            job.status === 'done' && errors.length ? 'Finished with errors' : job.status;
-        row.querySelector('.job-summary').textContent =
-            `${job.kind === 'sync' ? 'Sync' : 'Upload'} #${job.id} · ${status} · ${job.done}/${job.total} · ${elapsed}${job.error ? ' · ' + job.error : ''}`;
-        const [cancel, retry] = row.querySelectorAll('button');
-        cancel.hidden = job.status !== 'running';
-        cancel.disabled = job.cancel_requested;
-        const incomplete = ['failed', 'cancelled', 'interrupted'].includes(job.status);
-        retry.hidden = job.status === 'running' || !(incomplete || errors.length);
-        retry.disabled = history.some(item => item.status === 'running');
-        retry.textContent = incomplete ? 'Retry unfinished' : 'Retry failed';
-        const details = row.querySelector('details');
-        details.hidden = !errors.length;
-        const signature = JSON.stringify(errors);
-        if (details.dataset.errors !== signature) {
-            details.dataset.errors = signature;
-            details.querySelector('ul').replaceChildren(...errors.map(([id, error]) => {
-                const image = window.APP_STATE.imageList?.find(item => item.asset_id === id);
-                return makeElement('li', '', `${image?.original_filename || id}: ${error}`);
-            }));
-        }
-        existing.delete(job.id);
-    }
-    for (const row of existing.values()) row.remove();
-    // Insert existing nodes in newest-first order without replacing them.
-    history.forEach((job, index) => {
-        const row = list.querySelector(`[data-job-id="${job.id}"]`);
-        if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
-    });
-}
-
-async function retryBackgroundJob(id) {
-    if (syncInProgress || uploadInProgress || window.APP_STATE.cropBusy) return;
-    const job = jobHistory.find(item => item.id === id);
-    if (!job) return;
-    syncInProgress = window.APP_STATE.syncing = job.kind === 'sync';
-    uploadInProgress = job.kind === 'upload-all';
-    try {
-        const data = await postJSON(`/jobs/${id}/retry`, {});
-        await followJob(data.job);
-    } catch (error) {
-        showToast('Retry failed: ' + error.message, 'error');
-    } finally {
-        syncInProgress = uploadInProgress = window.APP_STATE.syncing = false;
-        await refreshImages();
-        await watchBackgroundJobs();
-    }
-}
-
-// Follow scheduled jobs and cancellations promptly while Manage is open.
-let checkingJobs = false;
-setInterval(async () => {
-    if (checkingJobs || document.hidden || window.ELEMENTS.manageModalEl?.style.display === 'none') return;
-    checkingJobs = true;
-    try { await watchBackgroundJobs(); } finally { checkingJobs = false; }
-}, 1000);
 
 /** "Label 3/10" while a job runs, once its total is known. */
 function progressLabel(label, job) {
@@ -212,7 +115,6 @@ async function syncWithImmich() {
 async function watchBackgroundJobs() {
     try {
         const data = await (await fetch('/jobs')).json();
-        renderJobHistory(data.history || []);
         showJobRunning(!!data.running || syncInProgress || uploadInProgress);
         const change = (data.history || []).filter(job => job.status !== 'running')
             .map(job => `${job.id}:${job.status}`).join(',');

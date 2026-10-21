@@ -1039,12 +1039,12 @@ body {
 
 .manage-action-btn.delete { background: var(--danger-soft); color: var(--danger); }
 .manage-action-btn.delete:hover { background: var(--danger-solid); color: #ffffff; }
-.manage-action-btn.reupload { background: var(--surface); border-color: var(--border-strong); color: var(--text); }
-.manage-action-btn.reupload:hover { background: var(--surface-3); }
+.manage-action-btn.reupload,
+.manage-action-btn.remove-from-album { background: var(--surface); border-color: var(--border-strong); color: var(--text); }
+.manage-action-btn.reupload:hover,
+.manage-action-btn.remove-from-album:hover { background: var(--surface-3); }
 .manage-action-btn.recrop { background: var(--accent); color: var(--on-accent); }
 .manage-action-btn.recrop:hover { background: var(--accent-hover); }
-.manage-action-btn.delete-original { background: var(--warning-soft); color: var(--warning); }
-.manage-action-btn.delete-original:hover { border-color: var(--warning); }
 
 .manage-no-image {
     color: var(--text-muted);
@@ -1552,12 +1552,4 @@ body {
         box-shadow: none;
     }
 }
-.job-history { margin: 0 0 1rem; }
-.job-history h3 { font-size: 1rem; margin: 0 0 .5rem; }
-.job-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; padding: .65rem 0; border-bottom: 1px solid var(--border); }
-.job-summary { flex: 1 1 250px; font-size: .85rem; overflow-wrap: anywhere; }
-.job-actions { display: flex; gap: .5rem; }
-.job-errors { flex-basis: 100%; font-size: .85rem; overflow-wrap: anywhere; }
-.job-errors summary { cursor: pointer; }
-.job-actions button[hidden], .job-errors[hidden] { display: none; }
 .settings-frame { max-width: 280px; margin-bottom: 1rem; }
