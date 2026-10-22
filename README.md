@@ -354,6 +354,11 @@ Settings lists your albums by name, so you only need IDs when editing
 
 ### Advanced Features
 
+**Remove from album** is available while cropping or reviewing a photo, as well
+as in Manage. It asks for confirmation before removing the photo from the source
+album. The original remains in your Immich library, and uploaded crops remain
+in the output album.
+
 #### Keyboard
 The crop editor is mouse and touch only. In dialogs, **Enter** confirms and
 **Escape** cancels; **Escape** also closes Manage, Settings and the Gallery. In

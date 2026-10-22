@@ -30,6 +30,7 @@ const ELEMENT_IDS = {
     btnBack: 'btn-back',
     btnSkip: 'btn-skip',
     btnReset: 'btn-reset',
+    btnRemoveFromAlbum: 'btn-remove-from-album',
     btnCrop: 'btn-crop',
     btnSave: 'btn-save',
     btnImmichSync: 'btn-immich-sync',

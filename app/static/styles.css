@@ -1420,7 +1420,7 @@ body {
        (updateStage sets display: block inline, so this stays a grid of blocks.) */
     .workflow-controls {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 6px;
         padding: 8px;
         padding-bottom: max(8px, env(safe-area-inset-bottom));

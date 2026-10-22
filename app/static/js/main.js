@@ -24,7 +24,7 @@ async function initializeApp() {
         if (window.APP_STATE.syncing || window.APP_STATE.cropBusy) return;
         window.APP_STATE.cropBusy = true;
         const controls = ['btnCropEl', 'btnSkipEl', 'btnBackEl', 'btnResetEl', 'btnSaveEl',
-            'btnImmichSyncEl', 'btnImmichUploadEl', 'btnMeuralPreviewEl'];
+            'btnImmichSyncEl', 'btnImmichUploadEl', 'btnMeuralPreviewEl', 'btnRemoveFromAlbumEl'];
         const buttons = controls.map(key => [window.ELEMENTS[key], window.ELEMENTS[key]?.disabled]);
         buttons.forEach(([button]) => { if (button) button.disabled = true; });
         try {
@@ -81,6 +81,11 @@ async function initializeApp() {
     }
 
     setupButtonHandler(window.ELEMENTS.btnResetEl, () => runCropAction(() => resetImage()));
+
+    setupButtonHandler(window.ELEMENTS.btnRemoveFromAlbumEl, () => runCropAction(async () => {
+        const image = window.APP_STATE.currentImage;
+        if (image) await removeFromInputAlbum(image.asset_id, window.ELEMENTS.btnRemoveFromAlbumEl);
+    }));
 
     setupButtonHandler(window.ELEMENTS.btnSaveEl, () => runCropAction(async () => {
         if (!window.APP_STATE.portraitCrop.width && !window.APP_STATE.landscapeCrop.width) {

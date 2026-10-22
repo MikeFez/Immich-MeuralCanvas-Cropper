@@ -397,11 +397,16 @@ const second = '22222222-2222-4222-8222-222222222222';
         assert.equal(await phone.locator('.sidebar').isVisible(), false);
         assert.ok(await phone.locator('#btn-library').isVisible());
         // The crop box and the main button both fit on screen without scrolling.
-        for (const selector of ['#crop-rectangle', '#btn-crop']) {
+        for (const selector of ['#crop-rectangle', '#btn-crop', '#btn-remove-from-album']) {
             const box = await phone.locator(selector).boundingBox();
             assert.ok(box.width > 0 && box.y >= 0 && box.y + box.height <= 844, selector);
         }
         assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 390);
+        await phone.locator('#btn-remove-from-album').tap();
+        assert.match(await phone.locator('.confirm-dialog').innerText(), /Nothing is deleted/);
+        await phone.locator('.confirm-dialog').getByRole('button', { name: 'Cancel', exact: true }).tap();
+        await phone.waitForFunction(() => !window.APP_STATE.cropBusy);
+        assert.equal(await phone.evaluate(() => window.APP_STATE.currentImage.asset_id), second);
         await phone.locator('#btn-library').tap();
         assert.ok(await phone.locator('.sidebar').isVisible());
         assert.equal(await phone.locator('#editor-view').isVisible(), false);
@@ -472,6 +477,51 @@ const second = '22222222-2222-4222-8222-222222222222';
         const restored = await scaled.evaluate(() => window.APP_STATE.portraitCrop);
         for (const key of ['x', 'y', 'width', 'height']) assert.ok(Math.abs(persisted[key] - restored[key]) < 1);
         assert.deepEqual(originalRequests, []);
+
+        let removalRequests = 0;
+        scaled.on('request', request => {
+            if (new URL(request.url()).pathname === '/delete-original') removalRequests++;
+        });
+        const remove = scaled.locator('#btn-remove-from-album');
+        await remove.click();
+        assert.match(await scaled.locator('.confirm-dialog').innerText(), /Nothing is deleted.*Immich library/);
+        await scaled.keyboard.press('Escape');
+        await scaled.waitForFunction(() => !window.APP_STATE.cropBusy);
+        assert.equal(removalRequests, 0);
+        assert.equal(await scaled.evaluate(() => window.APP_STATE.currentImage.asset_id), second);
+        await scaled.route('**/delete-original', route => route.fulfill({ status: 500,
+            json: { success: false, error: 'simulated removal failure' } }));
+        await remove.click();
+        await scaled.locator('.confirm-ok').click();
+        await scaled.waitForFunction(() => !window.APP_STATE.cropBusy);
+        assert.equal(await scaled.evaluate(() => window.APP_STATE.currentImage.asset_id), second);
+        assert.ok(await remove.isEnabled());
+        assert.ok((await scaled.locator('.app-toast.error').allInnerTexts()).some(text => text.includes('simulated removal failure')));
+        await scaled.unroute('**/delete-original');
+        let releaseRemoval;
+        const removalGate = new Promise(resolve => { releaseRemoval = resolve; });
+        let removalStarted;
+        const removing = new Promise(resolve => { removalStarted = resolve; });
+        await scaled.route('**/delete-original', async route => {
+            removalStarted(); await removalGate; await route.continue();
+        });
+        await remove.click();
+        await scaled.locator('.confirm-ok').click();
+        await removing;
+        try {
+            assert.ok(await remove.isDisabled());
+            assert.ok(await scaled.locator('#btn-crop').isDisabled());
+            await scaled.evaluate(id => selectImage(id), asset);
+            assert.equal(await scaled.evaluate(() => window.APP_STATE.currentImage.asset_id), second);
+        } finally { releaseRemoval(); }
+        await scaled.waitForFunction(() => !window.APP_STATE.cropBusy && !window.APP_STATE.currentImage);
+        assert.equal(removalRequests, 2);
+        assert.equal(await scaled.locator(`[data-identifier="${second}"]`).count(), 0);
+        assert.ok(await scaled.locator('#no-image-view').isVisible());
+        assert.equal(await scaled.locator(`[data-identifier="${asset}"]`).count(), 1);
+        const remaining = await (await scaled.request.get(`${baseURL}/images`)).json();
+        assert.ok(!remaining.some(image => image.asset_id === second));
+        console.log('PASS: editor album removal confirms, cancels, recovers from failure and clears the removed image');
         await scaled.close();
         console.log('PASS: smaller editor previews save, resize and restore crops in original pixels');
 
