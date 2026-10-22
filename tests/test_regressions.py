@@ -896,6 +896,20 @@ class CropRegressionTests(unittest.TestCase):
                 self.assertIn(message, response.json['error'])
         self.assertEqual(self.app.immich_handler.output_album_id, 'output-album')
 
+    def test_output_thumbnail_is_small_and_per_orientation_upload_state_is_listed(self):
+        from io import BytesIO
+        from PIL import Image
+        self.app.config.SIZES['portrait'] = (1080, 1920)
+        self.addCleanup(self.app.config.SIZES.__setitem__, 'portrait', (90, 160))
+        self.save()
+        full = self.client.get(f'/output/portrait/{ASSET}')
+        thumb = self.client.get(f'/output/portrait/{ASSET}?size=thumb')
+        self.assertEqual(Image.open(BytesIO(full.data)).size, (1080, 1920))
+        self.assertEqual(Image.open(BytesIO(thumb.data)).size, (405, 720))
+        self.assertNotEqual(full.headers['ETag'], thumb.headers['ETag'])
+        self.files.mark_uploaded(ASSET, 'portrait', 'p', PORTRAIT, (1080, 1920))
+        self.assertEqual(self.image()['needs_upload'], {'portrait': False, 'landscape': True})
+
     def test_frame_finish_defaults_validates_and_reaches_the_page(self):
         self.keep_settings()
         self.assertEqual(self.client.get('/settings').json['settings']['display'], {'frame': 'light-wood'})

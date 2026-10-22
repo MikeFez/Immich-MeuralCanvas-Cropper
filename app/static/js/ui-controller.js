@@ -37,6 +37,8 @@ const ELEMENT_IDS = {
     btnMeuralPreview: 'btn-meural-preview',
     btnManage: 'btn-manage',
     btnLibrary: 'btn-library',
+    btnGallery: 'btn-gallery',
+    galleryModal: 'gallery-modal',
     manageModal: 'manage-modal',
     manageModalClose: 'manage-modal-close',
     manageTableLoading: 'manage-table-loading',

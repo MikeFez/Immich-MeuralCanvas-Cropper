@@ -31,6 +31,7 @@ A comprehensive web application designed to seamlessly crop images from Immich f
 - **Aspect Ratio Preservation**: Automatic maintenance of correct aspect ratios
 - **Real-time Preview**: Live preview of crop areas with overlay visualization
 - **Saved Crop Data**: Persistent storage of crop coordinates for each image
+- **Gallery**: Browse every portrait or landscape crop, framed like your Canvas
 
 ### Immich Integration
 - **Direct Album Access**: Connect to specific Immich albums for input and output
@@ -63,6 +64,14 @@ A comprehensive web application designed to seamlessly crop images from Immich f
 </picture>
 </p>
 <p align="center"><sub>Review both crops before uploading &nbsp;·&nbsp; Manage, re-crop or re-upload anything you've processed</sub></p>
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/gallery-dark.webp">
+  <img src="docs/screenshots/gallery-light.webp" alt="Gallery: landscape crops in wood frames, some marked Not uploaded" width="80%">
+</picture>
+</p>
+<p align="center"><sub>The Gallery shows every portrait or landscape crop as it will hang on the Canvas</sub></p>
 
 <p align="center">
 <picture>
@@ -335,11 +344,20 @@ Settings lists your albums by name, so you only need IDs when editing
    - Click "Upload Crops" to save to Immich output album (crops already in
      Immich unchanged aren't sent again)
 
+6. **Browse the Gallery**
+   - Open **Gallery** (top right) and choose Portrait or Landscape; the counts
+     show how many crops each has, and your choice is remembered
+   - Crops appear in frames matching your Canvas, marked **Not uploaded** until
+     they're in Immich
+   - Click one for a large view; step through with the arrows, the arrow keys,
+     or by swiping on a phone. **Adjust crop** opens it in the editor
+
 ### Advanced Features
 
 #### Keyboard
 The crop editor is mouse and touch only. In dialogs, **Enter** confirms and
-**Escape** cancels; **Escape** also closes Manage and Settings.
+**Escape** cancels; **Escape** also closes Manage, Settings and the Gallery. In
+the Gallery's large view, the left and right arrow keys step through crops.
 
 #### Batch Operations
 - Open Manage (top right) for Sync, which downloads new and changed photos from the input album, and Upload All, which renders and uploads every crop that is new or changed since its last upload (or was uploaded at a different size). Manage's Re-upload sends one crop again regardless
@@ -453,11 +471,11 @@ endpoints take `{"identifier": "<asset-id>", ...}` and respond with the updated
 `image` record; errors are JSON `{"success": false, "error": "..."}`.
 
 ### Images
-- `GET /images`: cached source images with `crops`, `uploaded` (per orientation), `faces` and `status`
+- `GET /images`: cached source images with `crops`, `uploaded` and `needs_upload` (per orientation), `faces` and `status`
 - `GET /image/{asset_id}`: source image
 - `GET /editor-image/{asset_id}`: cached upright editor preview, up to 2048px
 - `GET /thumbnail/{asset_id}`: 320px thumbnail
-- `GET /output/{orientation}/{asset_id}`: saved crop rendered at frame size
+- `GET /output/{orientation}/{asset_id}`: saved crop rendered at frame size; `?size=thumb` renders it at most 720px, for grids
 - `POST /crop`: save a crop (`orientation`, `crop`)
 - `DELETE /crop-data/{asset_id}/{orientation}`: delete one saved crop, trashing its uploaded copy
 - `POST /reset`: delete both saved crops

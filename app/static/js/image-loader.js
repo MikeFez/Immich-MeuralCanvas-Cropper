@@ -174,9 +174,13 @@ function restoreSavedCrops(image) {
     }
 }
 
-/** Rendered-crop URL; the crop in the query string changes it whenever the crop does. */
-function previewURL(assetId, orientation, crop) {
-    return `/output/${orientation}/${encodeURIComponent(assetId)}?v=${encodeURIComponent(JSON.stringify(crop))}`;
+/**
+ * Rendered-crop URL at frame size, or at most 720 px for grids (thumb). The crop
+ * in the query string changes the URL whenever the crop does.
+ */
+function previewURL(assetId, orientation, crop, thumb = false) {
+    return `/output/${orientation}/${encodeURIComponent(assetId)}?v=${encodeURIComponent(JSON.stringify(crop))}` +
+        (thumb ? '&size=thumb' : '');
 }
 
 // Load the source image, then lay out the editor once it has dimensions
@@ -185,8 +189,10 @@ function loadImageAndInitCrop(selected) {
     image.onload = () => {
         image.style.display = 'block';
         showView('editor-view');
-        forceImageFit();
+        // Leave Review first: it hides the editor, and fitting a hidden editor
+        // would keep the previous photo's size.
         updateStage();
+        forceImageFit();
         isSelectingImage = false;
     };
     image.onerror = () => {

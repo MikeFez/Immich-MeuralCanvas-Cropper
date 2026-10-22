@@ -60,6 +60,9 @@ function initCropRectangle(aspectRatio) {
     const bounds = image.getBoundingClientRect();
     const parent = container.getBoundingClientRect();
     if (bounds.width <= 0 || bounds.height <= 0) return;
+    // Until it is fitted, a new photo can still have the previous one's size.
+    const source = sourceImageSize();
+    if (Math.abs(bounds.width / bounds.height - source.width / source.height) > 0.02) return;
     const left = bounds.left - parent.left, top = bounds.top - parent.top;
     Object.assign(container.dataset, { imgLeft: left, imgTop: top, imgWidth: bounds.width, imgHeight: bounds.height });
     const stage = window.APP_STATE.currentStage;

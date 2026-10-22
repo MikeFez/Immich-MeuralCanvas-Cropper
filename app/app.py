@@ -298,13 +298,19 @@ def get_thumbnail(asset_id):
     return send_file(thumbnail, mimetype='image/jpeg', conditional=True, etag=version, max_age=0)
 
 
+THUMB_SIZE = (720, 720)  # ?size=thumb: crops in grids (Gallery, Manage), without metadata
+
+
 @app.route("/output/<orientation>/<identifier>")
 @asset_route()
 def get_output_image(asset_id, orientation):
     crop = saved_crop(read_all_crop_metadata().get(asset_id, {}), require_orientation(orientation))
     if not crop:
         abort(404, "Saved crop not found")
-    content, key = cached_render(source_path(asset_id), crop, SIZES[orientation])
+    if request.args.get("size") == "thumb":
+        content, key = cached_render(source_path(asset_id), crop, SIZES[orientation], THUMB_SIZE, metadata=False)
+    else:
+        content, key = cached_render(source_path(asset_id), crop, SIZES[orientation])
     return send_file(io.BytesIO(content), mimetype='image/jpeg', conditional=True, etag=key, max_age=0)
 
 

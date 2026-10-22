@@ -31,6 +31,9 @@
             <button id="btn-library" class="header-button" title="Back to the image library">
                 <i class="fas fa-th"></i> <span class="header-button-label">Library</span>
             </button>
+            <button id="btn-gallery" class="header-button" title="Browse your portrait and landscape crops">
+                <i class="fas fa-images"></i> <span class="header-button-label">Gallery</span>
+            </button>
             <button id="btn-manage" class="header-button" title="Sync, upload and manage processed images">
                 <i class="fas fa-list"></i> <span class="header-button-label">Manage</span>
             </button>
@@ -223,6 +226,53 @@
     </div>
 
     <!-- Settings Modal -->
+    <!-- Gallery: every crop of one orientation, framed; click one for a large view. -->
+    <div id="gallery-modal" class="manage-modal gallery-modal" style="display: none;">
+        <div class="manage-modal-content gallery-content" role="dialog" aria-modal="true" aria-labelledby="gallery-title">
+            <div class="manage-modal-header gallery-header">
+                <h2 id="gallery-title"><i class="fas fa-images"></i> Gallery</h2>
+                <div class="gallery-toggle" role="group" aria-label="Orientation">
+                    <button type="button" data-orientation="portrait" aria-pressed="true">
+                        <i class="fas fa-mobile-alt"></i> Portrait <span class="gallery-count"></span>
+                    </button>
+                    <button type="button" data-orientation="landscape" aria-pressed="false">
+                        <i class="fas fa-desktop"></i> Landscape <span class="gallery-count"></span>
+                    </button>
+                </div>
+                <button type="button" id="gallery-close" class="manage-modal-close" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="gallery-body">
+                <div id="gallery-grid" class="gallery-grid"></div>
+                <p id="gallery-empty" class="gallery-empty" hidden></p>
+            </div>
+            <div id="gallery-viewer" class="gallery-viewer" hidden>
+                <button type="button" class="gallery-nav" data-step="-1" aria-label="Previous crop">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <figure class="gallery-stage">
+                    <span class="gallery-frame large"><span class="gallery-mat"><img id="gallery-viewer-img" alt=""></span></span>
+                    <figcaption>
+                        <span id="gallery-viewer-name" class="gallery-viewer-name"></span>
+                        <span id="gallery-viewer-position" class="gallery-viewer-position"></span>
+                    </figcaption>
+                </figure>
+                <button type="button" class="gallery-nav" data-step="1" aria-label="Next crop">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+                <div class="gallery-viewer-actions">
+                    <button type="button" id="gallery-viewer-back" class="btn btn-meural btn-secondary">
+                        <i class="fas fa-th"></i> All crops
+                    </button>
+                    <button type="button" id="gallery-viewer-adjust" class="btn btn-meural btn-success">
+                        <i class="fas fa-crop-alt"></i> Adjust crop
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="settings-modal" class="manage-modal" style="display: none;">
         <form id="settings-form" class="manage-modal-content settings-modal-content" novalidate>
             <div class="manage-modal-header">
@@ -358,6 +408,7 @@
     <script src="/static/js/main.js"></script>
     <script src="/static/js/meural-service.js"></script>
     <script src="/static/js/manage-service.js"></script>
+    <script src="/static/js/gallery-service.js"></script>
     <script src="/static/js/settings-service.js"></script>
 </body>
 </html>

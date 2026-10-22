@@ -248,6 +248,7 @@ def _describe(asset_id, source, entry):
         "source_size": dict(zip(("width", "height"), upright_size(os.path.join(INPUT_FOLDER, filename)))),
         "crops": {o: saved_crop(entry, o) for o in ORIENTATIONS},
         "uploaded": {o: bool(upload_records(entry, o)) for o in ORIENTATIONS},
+        "needs_upload": {o: needs_upload(entry, o) for o in ORIENTATIONS},
         "faces": source.get("faces") or [],
         "status": image_status(entry),
     }

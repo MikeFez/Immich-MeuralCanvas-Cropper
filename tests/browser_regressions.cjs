@@ -289,6 +289,53 @@ const second = '22222222-2222-4222-8222-222222222222';
         assert.equal((await step('#btn-back')).stage, 1);
         console.log('PASS: clicking a framed crop on Review returns to adjust it, framed in light wood by default');
 
+        // Leaving Review for a photo of another shape must size the crop box for the new photo.
+        await step('#btn-crop');
+        assert.equal((await step('#btn-crop')).stage, 3);
+        await page.locator(`[data-identifier="${asset}"]`).click();
+        await page.waitForFunction(asset => window.APP_STATE.currentImage?.asset_id === asset && window._cropRectangleInitialized, asset);
+        await page.evaluate(() => new Promise(requestAnimationFrame));
+        const switched = await page.evaluate(() => { updateCropValues(); return window.APP_STATE.portraitCrop; });
+        assert.ok(Math.abs(switched.width / switched.height - 90 / 160) < 0.01, `portrait crop ratio ${switched.width / switched.height}`);
+        console.log('PASS: a crop box opened from Review fits the new photo');
+        await step('#btn-skip');
+        assert.equal((await step('#btn-crop')).stage, 3);  // both images now have a landscape crop
+
+        // Gallery: one orientation's crops in frames, a large view to step through, and back to the editor.
+        await page.locator('#btn-gallery').click();
+        await page.waitForFunction(() => document.querySelectorAll('#gallery-grid .gallery-item').length > 0);
+        const counts = await page.locator('.gallery-toggle .gallery-count').allTextContents();
+        const listed = await page.evaluate(() => ['portrait', 'landscape'].map(o =>
+            String(window.APP_STATE.imageList.filter(image => image.crops[o]).length)));
+        assert.deepEqual(counts, listed);
+        await page.locator('.gallery-toggle [data-orientation="landscape"]').click();
+        assert.equal(await page.locator('.gallery-toggle [data-orientation="landscape"]').getAttribute('aria-pressed'), 'true');
+        const tiles = page.locator('#gallery-grid .gallery-item');
+        assert.equal(listed[1], '2');
+        assert.equal(await tiles.count(), 2);
+        assert.match(await tiles.first().locator('img').getAttribute('src'), /^\/output\/landscape\/.+&size=thumb$/);
+        await tiles.first().click();
+        assert.ok(await page.locator('#gallery-viewer').isVisible());
+        assert.match(await page.locator('#gallery-viewer-position').textContent(), /^1 of /);
+        assert.doesNotMatch(await page.locator('#gallery-viewer-img').getAttribute('src'), /size=thumb/);
+        await page.keyboard.press('ArrowRight');
+        assert.match(await page.locator('#gallery-viewer-position').textContent(), /^2 of /);
+        await page.keyboard.press('Escape');
+        assert.equal(await page.locator('#gallery-viewer').isVisible(), false);
+        assert.ok(await page.locator('#gallery-modal').isVisible());
+        await tiles.first().click();
+        const target = await page.evaluate(() => gallery.items[gallery.index].asset_id);
+        await page.locator('#gallery-viewer-adjust').click();
+        await page.waitForFunction(target => window.APP_STATE.currentImage?.asset_id === target &&
+            window.APP_STATE.currentStage === 2 && window._cropRectangleInitialized, target);
+        assert.equal(await page.locator('#gallery-modal').isVisible(), false);
+        await page.locator('#btn-gallery').click();
+        assert.equal(await page.locator('.gallery-toggle [data-orientation="landscape"]').getAttribute('aria-pressed'), 'true');
+        await page.keyboard.press('Escape');
+        assert.equal(await page.locator('#gallery-modal').isVisible(), false);
+        await page.evaluate(() => setGalleryOrientation('portrait'));
+        console.log('PASS: Gallery lists crops per orientation, steps through them and opens one in the editor');
+
         // Settings: albums come from Immich (faked here); the saved key is never sent to the browser.
         await page.route('**/settings/albums', route => route.fulfill({ json: { success: true, albums: [
             { id: 'source-album', name: 'Queue', assets: 2, shared: false },

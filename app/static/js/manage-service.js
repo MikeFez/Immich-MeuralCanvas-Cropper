@@ -116,7 +116,8 @@ function createManageTableRow(image) {
         } else {
             const cropCell = makeElement('div', 'manage-image-cell');
             const cropPreview = makeElement('img', 'manage-image-preview');
-            cropPreview.src = previewURL(identifier, orientation, metadata[orientation]);
+            cropPreview.src = previewURL(identifier, orientation, metadata[orientation], true);
+            cropPreview.loading = 'lazy';
             cropPreview.alt = orientation + ' crop';
             const cropInfo = makeElement('div', 'manage-image-info');
             const dimensions = getDimensions(orientation);
