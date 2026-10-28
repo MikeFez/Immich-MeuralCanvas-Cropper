@@ -9,6 +9,10 @@ immich:
   api_key: "YOUR_IMMICH_API_KEY"
   input_album_id: "YOUR_INPUT_ALBUM_ID"
   output_album_id: "YOUR_OUTPUT_ALBUM_ID"
+  # Optional: send each orientation to its own album instead of the shared one
+  # above. An orientation without its own entry falls back to output_album_id.
+  # output_album_portrait_id: "YOUR_PORTRAIT_ALBUM_ID"
+  # output_album_landscape_id: "YOUR_LANDSCAPE_ALBUM_ID"
 
 # Meural Canvas configuration
 meural:

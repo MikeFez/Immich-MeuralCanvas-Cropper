@@ -10,6 +10,7 @@ import threading
 from datetime import datetime, timezone
 from PIL import Image
 from utils.file_handler import image_lock, remove_cached_image, write_json_atomic
+from config import ORIENTATIONS
 
 
 ALBUM_PAGE_SIZE = 1000  # the most Immich returns per search page
@@ -60,6 +61,11 @@ class ImmichHandler:
         self.api_key = settings.get("api_key") or ""
         self.input_album_id = settings.get("input_album_id") or ""
         self.output_album_id = settings.get("output_album_id") or ""
+        # Each orientation's crops go to its own album when one is set, otherwise
+        # to the shared output album (the long-standing single-album behaviour).
+        self.output_album_ids = {
+            o: (settings.get(f"output_album_{o}_id") or self.output_album_id) for o in ORIENTATIONS
+        }
         self.headers = {"x-api-key": self.api_key, "Accept": "application/json"}
         # Whether the key has face.read: None until a sync asks, which it does
         # once per sync, so adding the permission in Immich takes effect.
@@ -67,6 +73,10 @@ class ImmichHandler:
         self.faces_lock = threading.Lock()
         self.faces_warned = False
 
+
+    def output_album(self, orientation):
+        """The album this orientation's crops are uploaded to."""
+        return self.output_album_ids.get(orientation) or self.output_album_id
 
     def _make_request(self, method: str, endpoint: str, quiet_statuses=(), **kwargs) -> Dict[str, Any]:
         """Make an HTTP request to the Immich API.

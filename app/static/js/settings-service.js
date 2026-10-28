@@ -8,6 +8,10 @@
 let savedSettings = null;
 let wasConfigured = false;
 
+// Output can be one shared album (output_album_id) or one per orientation.
+const OUTPUT_ALBUM_FIELDS = ['output_album_id', 'output_album_portrait_id', 'output_album_landscape_id'];
+const ALBUM_FIELDS = ['input_album_id', ...OUTPUT_ALBUM_FIELDS];
+
 const settingsField = name => window.ELEMENTS.settingsFormEl.elements[name];
 
 async function showSettingsModal() {
@@ -38,7 +42,10 @@ function fillSettingsForm(settings, configured) {
     settingsField('url').value = immich.url;
     settingsField('api_key').value = '';
     updateKeyPlaceholder();
-    for (const name of ['input_album_id', 'output_album_id']) setAlbumOptions(settingsField(name), [], immich[name]);
+    for (const name of ALBUM_FIELDS) setAlbumOptions(settingsField(name), [], immich[name]);
+    settingsField('split_output_albums').checked =
+        Boolean(immich.output_album_portrait_id || immich.output_album_landscape_id);
+    updateSplitOutputs();
     setAlbumStatus('');
     settingsField('sync_interval').value = sync.interval_minutes;
     settingsField('frame').value = display.frame;
@@ -59,6 +66,14 @@ function keyRequired() {
 function updateKeyPlaceholder() {
     settingsField('api_key').placeholder = !savedSettings.immich.has_api_key ? 'Paste your API key'
         : keyRequired() ? 'Required for a new URL' : 'Saved (leave blank to keep)';
+}
+
+/** Show the shared album select, or the two per-orientation selects. */
+function updateSplitOutputs() {
+    const split = settingsField('split_output_albums').checked;
+    const form = window.ELEMENTS.settingsFormEl;
+    for (const el of form.querySelectorAll('[data-output-shared]')) el.hidden = split;
+    for (const el of form.querySelectorAll('[data-output-split]')) el.hidden = !split;
 }
 
 function setAlbumStatus(message, type = '') {
@@ -89,7 +104,7 @@ async function loadAlbums() {
         const data = await postJSON('/settings/albums', {
             url: settingsField('url').value, api_key: settingsField('api_key').value
         });
-        for (const name of ['input_album_id', 'output_album_id']) {
+        for (const name of ALBUM_FIELDS) {
             const select = settingsField(name);
             setAlbumOptions(select, data.albums, select.value);
         }
@@ -141,12 +156,15 @@ function readSettingsForm() {
         ip: row.querySelector('[name="ip"]').value,
         preview_duration: Number(row.querySelector('[name="preview_duration"]').value)
     }));
+    const split = settingsField('split_output_albums').checked;
     return {
         immich: {
             url: settingsField('url').value,
             api_key: settingsField('api_key').value,
             input_album_id: settingsField('input_album_id').value,
-            output_album_id: settingsField('output_album_id').value
+            output_album_id: split ? '' : settingsField('output_album_id').value,
+            output_album_portrait_id: split ? settingsField('output_album_portrait_id').value : '',
+            output_album_landscape_id: split ? settingsField('output_album_landscape_id').value : ''
         },
         meural: { devices },
         sync: { interval_minutes: number('sync_interval') },
@@ -206,6 +224,7 @@ function setupSettingsModal() {
     settingsField('close').addEventListener('click', hideSettingsModal);
     settingsField('cancel').addEventListener('click', hideSettingsModal);
     settingsField('load_albums').addEventListener('click', loadAlbums);
+    settingsField('split_output_albums').addEventListener('change', updateSplitOutputs);
     settingsField('add_device').addEventListener('click', () => {
         const row = deviceRow();
         window.ELEMENTS.settingsDevicesEl.append(row);
