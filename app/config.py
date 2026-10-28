@@ -28,7 +28,8 @@ LEGACY_PROGRESS_FILE = os.path.join(CONFIG_DIR, "progress.json")
 
 DEFAULT_SETTINGS = {
     "dimensions": {"portrait_size": [1080, 1920], "landscape_size": [1920, 1080]},  # width x height
-    "immich": {"url": "", "api_key": "", "input_album_id": "", "output_album_id": ""},
+    "immich": {"url": "", "api_key": "", "input_album_id": "", "output_album_id": "",
+               "output_album_portrait_id": "", "output_album_landscape_id": ""},
     "meural": {"devices": []},
     "sync": {"interval_minutes": 15},  # 0 turns scheduled syncs off
     "display": {"frame": "light-wood"},  # the frame drawn around Review previews
@@ -68,8 +69,16 @@ def apply_settings(new):
     SIZES.update({o: tuple(new["dimensions"][f"{o}_size"]) for o in ORIENTATIONS})
 
 
+def output_album_id_for(orientation, immich=None):
+    """The album one orientation's crops go to: its own album if set, else the shared one."""
+    immich = immich if immich is not None else settings["immich"]
+    return immich.get(f"output_album_{orientation}_id") or immich.get("output_album_id") or ""
+
+
 def is_configured(current=None):
-    return all((current or settings)["immich"].get(key) for key in DEFAULT_SETTINGS["immich"])
+    immich = (current or settings)["immich"]
+    return (all(immich.get(key) for key in ("url", "api_key", "input_album_id")) and
+            all(output_album_id_for(o, immich) for o in ORIENTATIONS))
 
 
 def resolve_immich_login(url, api_key):
@@ -106,14 +115,24 @@ def validate_settings(data):
         raise ValueError("Settings must be an object")
     immich = data.get("immich") or {}
     login = resolve_immich_login(immich.get("url"), immich.get("api_key"))
-    albums = {}
-    for key, label in (("input_album_id", "input"), ("output_album_id", "output")):
+    def clean_album(key):
         album = immich.get(key)
-        if not isinstance(album, str) or not album.strip():
-            raise ValueError(f"Choose an {label} album")
-        albums[key] = album.strip()
-    if albums["input_album_id"] == albums["output_album_id"]:
-        raise ValueError("The input and output albums must be different")
+        return album.strip() if isinstance(album, str) else ""
+
+    input_album = clean_album("input_album_id")
+    if not input_album:
+        raise ValueError("Choose an input album")
+    # The shared album is used for any orientation without its own album, so a
+    # single output album stays valid; two albums (one per orientation) are too.
+    albums = {key: clean_album(key) for key in
+              ("output_album_id", "output_album_portrait_id", "output_album_landscape_id")}
+    for orientation in ORIENTATIONS:
+        effective = albums[f"output_album_{orientation}_id"] or albums["output_album_id"]
+        if not effective:
+            raise ValueError(f"Choose an output album for {orientation} crops")
+        if effective == input_album:
+            raise ValueError("The input and output albums must be different")
+    albums["input_album_id"] = input_album
 
     dimensions = data.get("dimensions") or {}
     sizes = {f"{o}_size": _positive_size(dimensions.get(f"{o}_size"), o.capitalize()) for o in ORIENTATIONS}

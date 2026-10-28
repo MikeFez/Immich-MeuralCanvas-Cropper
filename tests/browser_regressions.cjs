@@ -380,6 +380,34 @@ const second = '22222222-2222-4222-8222-222222222222';
         assert.equal(await page.evaluate(() => document.documentElement.dataset.frame), 'black');
         console.log('PASS: Settings loads albums, keeps the saved key, refuses it for a new URL and saves');
 
+        // Splitting output by orientation reveals two album selects and saves both.
+        await page.route('**/settings/albums', route => route.fulfill({ json: { success: true, albums: [
+            { id: 'source-album', name: 'Queue', assets: 2, shared: false },
+            { id: 'output-album', name: 'Crops', assets: 0, shared: false },
+            { id: 'new-output', name: 'Shared crops', assets: 1, shared: true }] } }));
+        await page.locator('#btn-settings').click();
+        await page.waitForFunction(() => /Connected: 3 albums/.test(document.getElementById('settings-album-status').textContent));
+        assert.equal(await field('split_output_albums').isChecked(), false);
+        assert.ok(await page.locator('[data-output-split]').first().isHidden());
+        await field('split_output_albums').check();
+        assert.ok(await page.locator('[data-output-shared]').first().isHidden());
+        await field('output_album_portrait_id').selectOption('output-album');
+        await field('output_album_landscape_id').selectOption('new-output');
+        await page.locator('[name="save"]').click();
+        await page.waitForFunction(() => document.getElementById('settings-modal').style.display === 'none');
+        const split = (await (await page.request.get(`${baseURL}/settings`)).json()).settings.immich;
+        assert.equal(split.output_album_portrait_id, 'output-album');
+        assert.equal(split.output_album_landscape_id, 'new-output');
+        assert.equal(split.output_album_id, '');
+        // Reopening shows the toggle on, with the saved albums selected.
+        await page.locator('#btn-settings').click();
+        await page.waitForFunction(() => document.getElementById('settings-split-output').checked);
+        assert.ok(await page.locator('[data-output-shared]').first().isHidden());
+        assert.equal(await field('output_album_portrait_id').inputValue(), 'output-album');
+        assert.equal(await field('output_album_landscape_id').inputValue(), 'new-output');
+        await field('close').click();
+        console.log('PASS: Settings can split output into per-orientation albums');
+
         // Phones show the library, then the editor in its place, with a Library button back.
         const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
         const phone = await phoneContext.newPage();

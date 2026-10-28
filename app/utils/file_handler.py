@@ -124,10 +124,10 @@ def forget_uploads(asset_id, orientation):
 def forget_missing_uploads(present_ids, find_legacy, listed_at):
     """Drop upload records whose Immich copy is no longer in the destination album.
 
-    present_ids is the album's asset IDs as listed at listed_at (ISO UTC);
-    find_legacy(filename) finds the copy of a record saved without an asset ID.
-    Records written after the listing, and unfinished uploads, are left alone.
-    Returns the asset IDs whose records changed.
+    present_ids maps each orientation to its album's asset IDs, as listed at
+    listed_at (ISO UTC); find_legacy(orientation, filename) finds the copy of a
+    record saved without an asset ID. Records written after the listing, and
+    unfinished uploads, are left alone. Returns the asset IDs whose records changed.
     """
     changed = []
     with state_lock:
@@ -138,8 +138,8 @@ def forget_missing_uploads(present_ids, find_legacy, listed_at):
                 record = state.get("uploaded")
                 if not record or state.get("pending_upload") or (record.get("at") or "") >= listed_at:
                     continue
-                remote_id = record.get("asset_id") or find_legacy(f"{asset_id}_{orientation}.jpg")
-                if remote_id in present_ids:
+                remote_id = record.get("asset_id") or find_legacy(orientation, f"{asset_id}_{orientation}.jpg")
+                if remote_id in present_ids[orientation]:
                     continue
                 del state["uploaded"]
                 if not state:

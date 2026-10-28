@@ -159,6 +159,28 @@ class CropRegressionTests(unittest.TestCase):
             with Image.open(io.BytesIO(content)) as image:
                 self.assertEqual(image.size, size)
 
+    def test_split_output_albums_send_each_orientation_to_its_own_album(self):
+        self.save()
+        handler = self.app.immich_handler
+        self.addCleanup(setattr, handler, 'output_album_ids', handler.output_album_ids)
+        handler.output_album_ids = {'portrait': 'album-p', 'landscape': 'album-l'}
+        with patch.object(handler, 'upload_asset', return_value='uploaded') as upload:
+            self.assertEqual(self.complete().status_code, 200)
+        targets = {call.args[1]: call.args[2] for call in upload.call_args_list}
+        self.assertEqual(targets[f'{ASSET}_portrait.jpg'], 'album-p')
+        self.assertEqual(targets[f'{ASSET}_landscape.jpg'], 'album-l')
+        # Each distinct album is read once, not once per orientation.
+        self.assertEqual({call.args[0] for call in handler.get_album_assets.call_args_list}, {'album-p', 'album-l'})
+
+    def test_shared_output_album_is_read_once_for_both_orientations(self):
+        self.save()
+        handler = self.app.immich_handler
+        with patch.object(handler, 'upload_asset', return_value='uploaded'):
+            self.assertEqual(self.complete().status_code, 200)
+        # Both orientations fall back to the one shared album, fetched a single time.
+        self.assertEqual(handler.get_album_assets.call_count, 1)
+        self.assertEqual(handler.get_album_assets.call_args.args[0], 'output-album')
+
     def test_complete_replaces_the_previous_album_copy(self):
         self.save(False)
         self.app.immich_handler.get_album_assets.return_value = [
@@ -305,12 +327,12 @@ class CropRegressionTests(unittest.TestCase):
         self.files.save_crop(legacy, 'portrait', PORTRAIT)
         self.files.mark_uploaded(legacy, 'portrait', None, PORTRAIT, self.app.config.SIZES['portrait'])
         album = [{'id': 'x', 'originalFileName': f'{legacy}_portrait.jpg'}]
+        present = {'portrait': {'x'}, 'landscape': {'x'}}
+        find_legacy = lambda orientation, name: self.app.find_processed_asset(album, name)
         # Uploaded after the album was listed: not yet in the listing, but kept.
-        changed = self.files.forget_missing_uploads({'x'}, lambda name: self.app.find_processed_asset(album, name),
-                                                    '2000-01-01T00:00:00+00:00')
+        changed = self.files.forget_missing_uploads(present, find_legacy, '2000-01-01T00:00:00+00:00')
         self.assertEqual(changed, [])
-        changed = self.files.forget_missing_uploads({'x'}, lambda name: self.app.find_processed_asset(album, name),
-                                                    '2999-01-01T00:00:00+00:00')
+        changed = self.files.forget_missing_uploads(present, find_legacy, '2999-01-01T00:00:00+00:00')
         self.assertEqual(changed, [ASSET])
         crops = self.files.read_all_crop_metadata()
         self.assertNotIn('uploaded', crops[ASSET]['portrait'])
@@ -859,6 +881,28 @@ class CropRegressionTests(unittest.TestCase):
         self.assertEqual(self.client.get('/meural/devices').json['devices'], [{'name': 'Hall', 'ip': '10.0.0.5'}])
         self.assertNotIn('test-only', json.dumps(response.json))
 
+    def test_split_output_albums_are_saved_applied_and_returned(self):
+        import yaml
+        self.keep_settings()
+        payload = self.settings_payload(output_album_id='', output_album_portrait_id='album-p',
+                                        output_album_landscape_id='album-l')
+        response = self.client.put('/settings', json=payload)
+        self.assertEqual(response.status_code, 200, response.json)
+        handler = self.app.immich_handler
+        self.assertEqual(handler.output_album('portrait'), 'album-p')
+        self.assertEqual(handler.output_album('landscape'), 'album-l')
+        saved = yaml.safe_load(Path(self.app.config.CONFIG_FILE).read_text())['immich']
+        self.assertEqual(saved['output_album_portrait_id'], 'album-p')
+        view = self.client.get('/settings').json['settings']['immich']
+        self.assertEqual(view['output_album_landscape_id'], 'album-l')
+
+    def test_shared_output_album_still_covers_both_orientations(self):
+        self.keep_settings()
+        response = self.client.put('/settings', json=self.settings_payload(output_album_id='shared'))
+        self.assertEqual(response.status_code, 200, response.json)
+        handler = self.app.immich_handler
+        self.assertEqual((handler.output_album('portrait'), handler.output_album('landscape')), ('shared', 'shared'))
+
     def test_saved_key_is_never_sent_to_a_different_url(self):
         self.keep_settings()
         before = Path(self.app.config.CONFIG_FILE).read_text()
@@ -879,6 +923,11 @@ class CropRegressionTests(unittest.TestCase):
             'url': (self.settings_payload(url='ftp://immich'), 'http://'),
             'same albums': (self.settings_payload(output_album_id='source-album'), 'must be different'),
             'no album': (self.settings_payload(input_album_id=' '), 'input album'),
+            'split missing one': (self.settings_payload(
+                output_album_id='', output_album_portrait_id='album-p'), 'output album for landscape'),
+            'split equals input': (self.settings_payload(
+                output_album_id='', output_album_portrait_id='source-album',
+                output_album_landscape_id='album-l'), 'must be different'),
         }
         size = self.settings_payload()
         size['dimensions']['landscape_size'] = [0, 90]
