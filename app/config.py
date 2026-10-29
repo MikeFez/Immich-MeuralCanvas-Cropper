@@ -27,7 +27,10 @@ CROP_METADATA_FILE = os.path.join(CONFIG_DIR, "crops", "metadata.json")
 LEGACY_PROGRESS_FILE = os.path.join(CONFIG_DIR, "progress.json")
 
 DEFAULT_SETTINGS = {
-    "dimensions": {"portrait_size": [1080, 1920], "landscape_size": [1920, 1080]},  # width x height
+    # Sizes set the crop aspect ratio; native_resolution uploads the cropped
+    # pixels as-is (no resize to those sizes) for maximum quality.
+    "dimensions": {"portrait_size": [1080, 1920], "landscape_size": [1920, 1080],  # width x height
+                   "native_resolution": False},
     "immich": {"url": "", "api_key": "", "input_album_id": "", "output_album_id": ""},
     "meural": {"devices": []},
     "sync": {"interval_minutes": 15},  # 0 turns scheduled syncs off
@@ -66,6 +69,11 @@ def apply_settings(new):
     settings.clear()
     settings.update(copy.deepcopy(new))
     SIZES.update({o: tuple(new["dimensions"][f"{o}_size"]) for o in ORIENTATIONS})
+
+
+def native_resolution():
+    """True when crops upload at their native pixels instead of being resized to SIZES."""
+    return bool(settings.get("dimensions", {}).get("native_resolution"))
 
 
 def is_configured(current=None):
@@ -117,6 +125,10 @@ def validate_settings(data):
 
     dimensions = data.get("dimensions") or {}
     sizes = {f"{o}_size": _positive_size(dimensions.get(f"{o}_size"), o.capitalize()) for o in ORIENTATIONS}
+    native = dimensions.get("native_resolution", DEFAULT_SETTINGS["dimensions"]["native_resolution"])
+    if not isinstance(native, bool):
+        raise ValueError("Native resolution must be true or false")
+    sizes["native_resolution"] = native
 
     devices = []
     for device in (data.get("meural") or {}).get("devices") or []:

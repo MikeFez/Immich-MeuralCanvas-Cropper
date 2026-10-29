@@ -31,3 +31,8 @@ function getAspectRatio(orientation) {
     const dims = getDimensions(orientation);
     return dims.width / dims.height;
 }
+
+/** True when crops upload at their native pixels, so the sizes only set the aspect ratio. */
+function isNativeResolution() {
+    return Boolean(window.CONFIG.initialized && window.CONFIG.dimensions.native_resolution);
+}

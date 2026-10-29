@@ -355,9 +355,16 @@ function updateCropValues() {
 /** Show how many original pixels the crop uses, warning when the output enlarges them. */
 function showCropResolution(crop, orientation) {
     const element = window.ELEMENTS.cropResolutionEl;
+    const used = `${Math.round(crop.width)}×${Math.round(crop.height)} px`;
+    if (isNativeResolution()) {
+        // No resize happens, so the crop can never be enlarged; show its true size.
+        element.classList.remove('low');
+        element.textContent = `Uploads ${used} of the original at native resolution`;
+        element.hidden = false;
+        return;
+    }
     const { width, height } = getDimensions(orientation);
     const scale = width / crop.width;
-    const used = `${Math.round(crop.width)}×${Math.round(crop.height)} px`;
     // Allow a little slack: a few percent of enlargement isn't visible.
     const low = scale > 1.05;
     element.classList.toggle('low', low);

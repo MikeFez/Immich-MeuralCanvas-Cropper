@@ -214,7 +214,8 @@ def index():
 @app.route("/dimensions")
 def get_dimensions():
     """Get image dimensions from config"""
-    return jsonify({o: {"width": w, "height": h} for o, (w, h) in SIZES.items()})
+    return jsonify({**{o: {"width": w, "height": h} for o, (w, h) in SIZES.items()},
+                    "native_resolution": config.native_resolution()})
 
 
 def settings_view():
@@ -307,10 +308,11 @@ def get_output_image(asset_id, orientation):
     crop = saved_crop(read_all_crop_metadata().get(asset_id, {}), require_orientation(orientation))
     if not crop:
         abort(404, "Saved crop not found")
+    target = None if config.native_resolution() else SIZES[orientation]
     if request.args.get("size") == "thumb":
-        content, key = cached_render(source_path(asset_id), crop, SIZES[orientation], THUMB_SIZE, metadata=False)
+        content, key = cached_render(source_path(asset_id), crop, target, THUMB_SIZE, metadata=False)
     else:
-        content, key = cached_render(source_path(asset_id), crop, SIZES[orientation])
+        content, key = cached_render(source_path(asset_id), crop, target)
     return send_file(io.BytesIO(content), mimetype='image/jpeg', conditional=True, etag=key, max_age=0)
 
 
@@ -415,10 +417,13 @@ def upload_saved_crops(asset_id, orientations=None, album_assets=None):
         uploaded = []
         try:
             path = source_path(asset_id)
+            # Native resolution uploads the cropped pixels as-is (no resize to SIZES).
+            native = config.native_resolution()
             if album_assets is None:
                 album_assets = immich_handler.get_album_assets(immich_handler.output_album_id)
             for orientation in orientations:
                 crop, size = entry[orientation]["crop"], SIZES[orientation]
+                target = None if native else size
                 filename = f'{asset_id}_{orientation}.jpg'
                 context = {'server': immich_handler.base_url, 'album': immich_handler.output_album_id}
                 pending = entry[orientation].get('pending_upload')
@@ -427,25 +432,27 @@ def upload_saved_crops(asset_id, orientations=None, album_assets=None):
 
                 def checkpoint(state, selection=crop, output_size=size):
                     checkpoint_upload(asset_id, orientation, {
-                        **state, **context, 'crop': selection, 'size': list(output_size),
+                        **state, **context, 'crop': selection, 'size': list(output_size), 'native': native,
                         'source_version': source_version(os.path.basename(path)),
                     })
 
                 previous = find_processed_asset(album_assets, filename)
                 if pending and (pending['crop'] != crop or pending['size'] != list(size) or
+                                bool(pending.get('native')) != native or
                                 pending.get('source_version') != source_version(os.path.basename(path))):
                     # Finish retiring the earlier copy before publishing a newer selection.
                     previous = immich_handler.upload_asset(
                         b'', filename, immich_handler.output_album_id, resume=pending,
                         checkpoint=lambda state: checkpoint_upload(asset_id, orientation, {**pending, **state}),
                     )
-                    mark_uploaded(asset_id, orientation, previous, pending['crop'], pending['size'])
+                    mark_uploaded(asset_id, orientation, previous, pending['crop'], pending['size'],
+                                  bool(pending.get('native')))
                     pending = None
                 remote_id = immich_handler.upload_asset(
-                    b'' if pending else cached_render(path, crop, size)[0], filename,
+                    b'' if pending else cached_render(path, crop, target)[0], filename,
                     immich_handler.output_album_id, replaces=previous, resume=pending, checkpoint=checkpoint,
                 )
-                mark_uploaded(asset_id, orientation, remote_id, crop, size)
+                mark_uploaded(asset_id, orientation, remote_id, crop, size, native)
                 uploaded.append({'filename': filename, 'asset_id': remote_id,
                                  'original_asset_id': asset_id, 'orientation': orientation})
             return uploaded

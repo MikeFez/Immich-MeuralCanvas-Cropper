@@ -14,7 +14,7 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 from utils.image_processor import upright_size
-from config import INPUT_FOLDER, CROP_METADATA_FILE, LEGACY_PROGRESS_FILE, THUMBNAIL_FOLDER, ORIENTATIONS, SIZES
+from config import INPUT_FOLDER, CROP_METADATA_FILE, LEGACY_PROGRESS_FILE, THUMBNAIL_FOLDER, ORIENTATIONS, SIZES, settings
 
 METADATA_DIR = os.path.join(INPUT_FOLDER, ".metadata")
 
@@ -96,9 +96,10 @@ def delete_crops(asset_id, orientation=None):
     _update_entry(asset_id, change)
 
 
-def mark_uploaded(asset_id, orientation, remote_id, crop, size):
-    """Record which selection and output size the Immich copy was rendered from."""
-    record = {"asset_id": remote_id, "crop": crop, "size": list(size), "at": datetime.now(timezone.utc).isoformat()}
+def mark_uploaded(asset_id, orientation, remote_id, crop, size, native=False):
+    """Record which selection, output size and resolution mode the Immich copy was rendered from."""
+    record = {"asset_id": remote_id, "crop": crop, "size": list(size), "native": bool(native),
+              "at": datetime.now(timezone.utc).isoformat()}
     def update(entry):
         state = entry.setdefault(orientation, {})
         state['uploaded'] = record
@@ -162,8 +163,11 @@ def needs_upload(entry, orientation):
         return False
     uploaded = entry[orientation].get("uploaded") or {}
     size = list(SIZES[orientation])
-    # Records from before sizes were tracked count as the current size.
-    return bool(entry[orientation].get("pending_upload")) or uploaded.get("crop") != crop or uploaded.get("size", size) != size
+    native = bool(settings.get("dimensions", {}).get("native_resolution"))
+    # Records from before sizes were tracked count as the current size; records
+    # from before native mode existed count as fixed-size (native=False).
+    return (bool(entry[orientation].get("pending_upload")) or uploaded.get("crop") != crop or
+            uploaded.get("size", size) != size or bool(uploaded.get("native")) != native)
 
 
 def image_status(entry):

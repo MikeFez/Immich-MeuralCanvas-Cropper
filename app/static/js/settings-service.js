@@ -48,6 +48,7 @@ function fillSettingsForm(settings, configured) {
         settingsField(`${orientation}_width`).value = width;
         settingsField(`${orientation}_height`).value = height;
     }
+    settingsField('native_resolution').checked = Boolean(dimensions.native_resolution);
 }
 
 /** The key may stay blank only while the URL is the saved one. */
@@ -153,7 +154,8 @@ function readSettingsForm() {
         display: { frame: settingsField('frame').value },
         dimensions: {
             portrait_size: [number('portrait_width'), number('portrait_height')],
-            landscape_size: [number('landscape_width'), number('landscape_height')]
+            landscape_size: [number('landscape_width'), number('landscape_height')],
+            native_resolution: settingsField('native_resolution').checked
         }
     };
 }
@@ -164,9 +166,16 @@ async function saveSettings(event) {
     const previous = savedSettings;
     const sizesChanged = ['portrait_size', 'landscape_size'].some(key =>
         payload.dimensions[key].join() !== previous.dimensions[key].join());
-    if (sizesChanged && window.APP_STATE.imageList.some(image => image.crops.portrait || image.crops.landscape) &&
+    const nativeChanged = Boolean(payload.dimensions.native_resolution) !== Boolean(previous.dimensions.native_resolution);
+    const outputChanged = sizesChanged || nativeChanged;
+    const hasCrops = window.APP_STATE.imageList.some(image => image.crops.portrait || image.crops.landscape);
+    if (sizesChanged && hasCrops &&
         !await confirmDialog('Saved crops keep their current proportions and will be padded with black bars ' +
             'until you re-crop them, and every crop will need uploading again. Change the crop sizes?', 'Change sizes')) {
+        return;
+    }
+    if (nativeChanged && !sizesChanged && hasCrops &&
+        !await confirmDialog('Every crop will need uploading again at the new resolution. Change it?', 'Change resolution')) {
         return;
     }
     const save = settingsField('save');
@@ -185,10 +194,10 @@ async function saveSettings(event) {
     hideSettingsModal();
     showToast('Settings saved', 'success');
 
-    if (sizesChanged) {
+    if (outputChanged) {
         await initializeConfig();
         if (window.APP_STATE.currentImage) updateStage();
-        await refreshImages(); // Every crop now needs uploading at the new size.
+        await refreshImages(); // Every crop now needs uploading at the new size/resolution.
     }
     // A different album or server means a different set of source images.
     const before = previous.immich, after = data.settings.immich;
