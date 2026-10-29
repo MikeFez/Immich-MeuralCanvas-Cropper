@@ -4,9 +4,15 @@
  */
 
 const GALLERY_KEY = 'galleryOrientation';
+const GALLERY_LOWRES_KEY = 'galleryLowResOnly';
+// A crop is "low-res" when it uses noticeably fewer original pixels than the
+// crop size, so it is enlarged (or, in native mode, simply shown small) and
+// looks soft on the Canvas. Matches the editor's threshold.
+const LOWRES_SCALE = 1.05;
 const gallery = {
     orientation: 'portrait',
-    items: [],      // images with a saved crop in the current orientation
+    lowResOnly: false,
+    items: [],      // images with a saved crop in the current orientation (after any filter)
     index: -1,      // the one in the large view, or -1 for the grid
 };
 const galleryElement = id => document.getElementById(id);
@@ -14,7 +20,19 @@ const galleryElement = id => document.getElementById(id);
 try {
     const saved = localStorage.getItem(GALLERY_KEY);
     if (saved === 'portrait' || saved === 'landscape') gallery.orientation = saved;
-} catch { /* storage unavailable: start with portrait */ }
+    gallery.lowResOnly = localStorage.getItem(GALLERY_LOWRES_KEY) === '1';
+} catch { /* storage unavailable: start with portrait, all crops */ }
+
+/** How much the crop's original pixels are stretched to fill the crop size (>1 = enlarged). */
+function cropScale(image, orientation) {
+    const crop = image.crops?.[orientation];
+    if (!crop || !window.CONFIG.initialized) return 1;
+    return getDimensions(orientation).width / crop.width;
+}
+
+function isLowRes(image, orientation) {
+    return cropScale(image, orientation) > LOWRES_SCALE;
+}
 
 async function showGallery() {
     if (window.APP_STATE.cropBusy) return;
@@ -57,13 +75,19 @@ function renderGallery() {
         button.querySelector('.gallery-count').textContent = counts[orientation];
     }
     const orientation = gallery.orientation;
-    gallery.items = images.filter(image => image.crops?.[orientation]);
+    const withCrop = images.filter(image => image.crops?.[orientation]);
+    const lowResCount = withCrop.filter(image => isLowRes(image, orientation)).length;
+    galleryElement('gallery-lowres-only').checked = gallery.lowResOnly;
+    galleryElement('gallery-lowres-count').textContent = lowResCount;
+    gallery.items = gallery.lowResOnly ? withCrop.filter(image => isLowRes(image, orientation)) : withCrop;
 
     const grid = galleryElement('gallery-grid');
     grid.className = `gallery-grid ${orientation}`;
     const empty = galleryElement('gallery-empty');
     empty.hidden = gallery.items.length > 0;
-    empty.textContent = `No ${orientation} crops yet. Crop an image and it appears here.`;
+    empty.textContent = gallery.lowResOnly
+        ? `No low-res ${orientation} crops — every one fills the crop size.`
+        : `No ${orientation} crops yet. Crop an image and it appears here.`;
 
     // Reuse tiles by asset so re-rendering never reloads thumbnails.
     const existing = new Map(Array.from(grid.children).map(tile => [tile.dataset.identifier, tile]));
@@ -88,6 +112,9 @@ function renderGallery() {
         thumbnail.alt = name;
         const caption = tile.querySelector('.gallery-caption');
         caption.replaceChildren(makeElement('span', 'gallery-name', name));
+        if (isLowRes(image, orientation)) {
+            caption.append(makeElement('span', 'gallery-badge low-res', `Low-res ${cropScale(image, orientation).toFixed(1)}×`));
+        }
         if (image.needs_upload?.[orientation]) caption.append(makeElement('span', 'gallery-badge', 'Not uploaded'));
         tile.title = name;
         tile.dataset.index = index;
@@ -111,8 +138,11 @@ function openGalleryViewer(index) {
     large.src = previewURL(image.asset_id, orientation, image.crops[orientation]);
     large.alt = `${name}, ${orientation} crop`;
     galleryElement('gallery-viewer-name').textContent = name;
+    const crop = image.crops[orientation];
+    const lowRes = isLowRes(image, orientation)
+        ? ` · Low-res: uses ${Math.round(crop.width)}×${Math.round(crop.height)}px of the original` : '';
     galleryElement('gallery-viewer-position').textContent = `${gallery.index + 1} of ${count}` +
-        (image.needs_upload?.[orientation] ? ' · Not uploaded' : '');
+        (image.needs_upload?.[orientation] ? ' · Not uploaded' : '') + lowRes;
     for (const button of viewer.querySelectorAll('.gallery-nav')) button.disabled = count < 2;
     // Load the neighbours ahead of time so stepping through feels instant.
     for (const step of [-1, 1]) {
@@ -147,6 +177,13 @@ function setupGallery() {
     for (const button of document.querySelectorAll('.gallery-toggle button')) {
         button.addEventListener('click', () => setGalleryOrientation(button.dataset.orientation));
     }
+    galleryElement('gallery-lowres-only').addEventListener('change', event => {
+        gallery.lowResOnly = event.target.checked;
+        try { localStorage.setItem(GALLERY_LOWRES_KEY, gallery.lowResOnly ? '1' : '0'); } catch { /* not remembered */ }
+        galleryElement('gallery-grid').scrollTop = 0;
+        closeGalleryViewer();
+        renderGallery();
+    });
     galleryElement('gallery-grid').addEventListener('click', event => {
         const tile = event.target.closest('.gallery-item');
         if (tile) openGalleryViewer(Number(tile.dataset.index));

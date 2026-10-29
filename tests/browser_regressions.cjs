@@ -336,6 +336,27 @@ const second = '22222222-2222-4222-8222-222222222222';
         await page.evaluate(() => setGalleryOrientation('portrait'));
         console.log('PASS: Gallery lists crops per orientation, steps through them and opens one in the editor');
 
+        // Low-res filter: a crop using fewer pixels than the crop size is flagged and can be isolated.
+        await page.request.post(`${baseURL}/crop`, { data: { identifier: asset, orientation: 'landscape',
+            crop: { x: 0, y: 0, width: 60, height: 34 } } });  // 60px wide vs the 160px landscape size
+        await page.locator('#btn-gallery').click();
+        await page.waitForFunction(() => document.querySelectorAll('#gallery-grid .gallery-item').length > 0);
+        await page.locator('.gallery-toggle [data-orientation="landscape"]').click();
+        assert.equal(await page.locator('#gallery-lowres-count').textContent(), '1');
+        const lowResTile = page.locator(`#gallery-grid .gallery-item[data-identifier="${asset}"]`);
+        assert.match(await lowResTile.locator('.gallery-badge.low-res').textContent(), /Low-res/);
+        await page.locator('#gallery-lowres-only').check();
+        await page.waitForFunction(() => document.querySelectorAll('#gallery-grid .gallery-item').length === 1);
+        assert.equal(await page.locator('#gallery-grid .gallery-item').getAttribute('data-identifier'), asset);
+        await page.locator('#gallery-grid .gallery-item').click();
+        assert.match(await page.locator('#gallery-viewer-position').textContent(), /Low-res: uses 60×34px/);
+        await page.keyboard.press('Escape');  // close the large viewer
+        await page.locator('#gallery-lowres-only').uncheck();
+        await page.waitForFunction(() => document.querySelectorAll('#gallery-grid .gallery-item').length === 2);
+        await page.keyboard.press('Escape');  // close the gallery
+        await page.evaluate(() => setGalleryOrientation('portrait'));
+        console.log('PASS: Gallery low-res filter flags and isolates undersized crops');
+
         // Settings: albums come from Immich (faked here); the saved key is never sent to the browser.
         await page.route('**/settings/albums', route => route.fulfill({ json: { success: true, albums: [
             { id: 'source-album', name: 'Queue', assets: 2, shared: false },
