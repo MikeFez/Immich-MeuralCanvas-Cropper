@@ -1686,6 +1686,27 @@ body {
     font-weight: 600;
 }
 
+/* Low-res stands apart from the amber "Not uploaded" badge. */
+.gallery-badge.low-res {
+    background: var(--danger-soft);
+    color: var(--danger);
+}
+
+.gallery-lowres-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.gallery-lowres-filter input { cursor: pointer; }
+.gallery-lowres-filter .fa-triangle-exclamation { color: var(--danger); }
+.gallery-lowres-filter .gallery-count { background: var(--danger-soft); color: var(--danger); }
+
 .gallery-empty {
     margin: 0;
     padding: 64px 24px;
