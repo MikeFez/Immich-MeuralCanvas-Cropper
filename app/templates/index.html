@@ -321,10 +321,28 @@
                             <select id="settings-input-album" name="input_album_id" class="form-select"></select>
                             <div class="form-text">Photos to crop</div>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="settings-split-output" name="split_output_albums">
+                                <label class="form-check-label" for="settings-split-output">
+                                    Use a separate output album for each orientation
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6" data-output-shared>
                             <label class="form-label" for="settings-output-album">Output album</label>
                             <select id="settings-output-album" name="output_album_id" class="form-select"></select>
                             <div class="form-text">Where finished crops are uploaded</div>
+                        </div>
+                        <div class="col-md-6" data-output-split hidden>
+                            <label class="form-label" for="settings-output-album-portrait">Portrait crops album</label>
+                            <select id="settings-output-album-portrait" name="output_album_portrait_id" class="form-select"></select>
+                            <div class="form-text">Where portrait crops are uploaded</div>
+                        </div>
+                        <div class="col-md-6" data-output-split hidden>
+                            <label class="form-label" for="settings-output-album-landscape">Landscape crops album</label>
+                            <select id="settings-output-album-landscape" name="output_album_landscape_id" class="form-select"></select>
+                            <div class="form-text">Where landscape crops are uploaded</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label" for="settings-sync-interval">Sync every</label>

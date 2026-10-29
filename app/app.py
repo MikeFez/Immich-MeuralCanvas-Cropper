@@ -129,12 +129,13 @@ def reconcile_uploads():
     """
     listed_at = datetime.now(timezone.utc).isoformat()
     try:
-        album_assets = immich_handler.get_album_assets(immich_handler.output_album_id)
+        album_assets = output_album_assets()
     except Exception as e:
         logging.warning("Could not check the destination album for removed uploads: %s", e)
         return None
-    changed = forget_missing_uploads({asset["id"] for asset in album_assets},
-                                     lambda filename: find_processed_asset(album_assets, filename), listed_at)
+    present = {o: {asset["id"] for asset in assets} for o, assets in album_assets.items()}
+    changed = forget_missing_uploads(
+        present, lambda orientation, filename: find_processed_asset(album_assets[orientation], filename), listed_at)
     if changed:
         logging.info("%d image(s) have crops missing from the destination album; they need uploading again", len(changed))
     return len(changed)
@@ -151,14 +152,15 @@ def retire_uploads(asset_id, orientations):
     if not any(records.values()):
         return
     try:
-        album_assets = immich_handler.get_album_assets(immich_handler.output_album_id)
-        present = {asset["id"] for asset in album_assets}
+        album_assets = output_album_assets()
         for orientation, found in records.items():
             if not found:
                 continue
+            assets = album_assets[orientation]
+            present = {asset["id"] for asset in assets}
             remote_ids = {record.get("asset_id") for record in found}
             if None in remote_ids:
-                remote_ids.add(find_processed_asset(album_assets, f"{asset_id}_{orientation}.jpg"))
+                remote_ids.add(find_processed_asset(assets, f"{asset_id}_{orientation}.jpg"))
             for remote_id in sorted(remote_ids & present):
                 immich_handler.trash_asset(remote_id)
             forget_uploads(asset_id, orientation)
@@ -167,7 +169,20 @@ def retire_uploads(asset_id, orientations):
 
 
 def job_scope():
-    return {key: config.settings['immich'][key] for key in ('url', 'input_album_id', 'output_album_id')}
+    return {key: config.settings['immich'][key] for key in
+            ('url', 'input_album_id', 'output_album_id',
+             'output_album_portrait_id', 'output_album_landscape_id')}
+
+
+def output_album_assets():
+    """Each orientation's destination-album assets, fetching a shared album only once."""
+    by_album, by_orientation = {}, {}
+    for orientation in ORIENTATIONS:
+        album = immich_handler.output_album(orientation)
+        if album not in by_album:
+            by_album[album] = immich_handler.get_album_assets(album)
+        by_orientation[orientation] = by_album[album]
+    return by_orientation
 
 
 def start_job(kind, work):
@@ -420,12 +435,14 @@ def upload_saved_crops(asset_id, orientations=None, album_assets=None):
             # Native resolution uploads the cropped pixels as-is (no resize to SIZES).
             native = config.native_resolution()
             if album_assets is None:
-                album_assets = immich_handler.get_album_assets(immich_handler.output_album_id)
+                album_assets = output_album_assets()
             for orientation in orientations:
+                album_id = immich_handler.output_album(orientation)
+                assets = album_assets[orientation]
                 crop, size = entry[orientation]["crop"], SIZES[orientation]
                 target = None if native else size
                 filename = f'{asset_id}_{orientation}.jpg'
-                context = {'server': immich_handler.base_url, 'album': immich_handler.output_album_id}
+                context = {'server': immich_handler.base_url, 'album': album_id}
                 pending = entry[orientation].get('pending_upload')
                 if pending and any(pending.get(key) != value for key, value in context.items()):
                     raise RuntimeError('An unfinished upload belongs to different Immich settings; restore those settings to finish it')
@@ -436,13 +453,13 @@ def upload_saved_crops(asset_id, orientations=None, album_assets=None):
                         'source_version': source_version(os.path.basename(path)),
                     })
 
-                previous = find_processed_asset(album_assets, filename)
+                previous = find_processed_asset(assets, filename)
                 if pending and (pending['crop'] != crop or pending['size'] != list(size) or
                                 bool(pending.get('native')) != native or
                                 pending.get('source_version') != source_version(os.path.basename(path))):
                     # Finish retiring the earlier copy before publishing a newer selection.
                     previous = immich_handler.upload_asset(
-                        b'', filename, immich_handler.output_album_id, resume=pending,
+                        b'', filename, album_id, resume=pending,
                         checkpoint=lambda state: checkpoint_upload(asset_id, orientation, {**pending, **state}),
                     )
                     mark_uploaded(asset_id, orientation, previous, pending['crop'], pending['size'],
@@ -450,7 +467,7 @@ def upload_saved_crops(asset_id, orientations=None, album_assets=None):
                     pending = None
                 remote_id = immich_handler.upload_asset(
                     b'' if pending else cached_render(path, crop, target)[0], filename,
-                    immich_handler.output_album_id, replaces=previous, resume=pending, checkpoint=checkpoint,
+                    album_id, replaces=previous, resume=pending, checkpoint=checkpoint,
                 )
                 mark_uploaded(asset_id, orientation, remote_id, crop, size, native)
                 uploaded.append({'filename': filename, 'asset_id': remote_id,
@@ -496,8 +513,8 @@ def run_upload_all(progress, asset_ids=None):
     progress.plan(pending)
     if not pending:
         return {'success': True, 'uploaded_assets': [], 'failed_assets': [], 'error': None}
-    # One album fetch for the whole batch; each crop only matches its own entry.
-    album_assets = immich_handler.get_album_assets(immich_handler.output_album_id)
+    # One fetch per distinct album for the whole batch; each crop only matches its own entry.
+    album_assets = output_album_assets()
     for asset_id in pending:
         if progress.cancelled():
             break

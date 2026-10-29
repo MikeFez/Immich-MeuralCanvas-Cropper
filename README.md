@@ -220,9 +220,12 @@ Open **Settings** (top right). On first start it opens by itself.
    for the permissions it needs).
 2. Click **Connect & load albums**, then choose the **input album** (photos to
    crop) and the **output album** (where crops go). Albums shared with you are
-   listed too; the two must be different. **Sync every** sets how often the
-   input album is checked for new and changed photos (default 15 minutes; 0
-   turns it off). Open pages pick up the changes by themselves.
+   listed too; the input and output albums must be different. Tick **Use a
+   separate output album for each orientation** to send portrait and landscape
+   crops to two different albums instead of one shared album. **Sync every**
+   sets how often the input album is checked for new and changed photos
+   (default 15 minutes; 0 turns it off). Open pages pick up the changes by
+   themselves.
 3. Add your Meural Canvas devices (optional), pick your Canvas's **frame
    finish** (light wood, dark wood, black or white; used to draw the Review
    preview, light wood by default), and set the crop sizes to your Canvas's
@@ -261,6 +264,9 @@ immich:
   api_key: "your-immich-api-key"
   input_album_id: "album-id-for-source-images"
   output_album_id: "album-id-for-cropped-images"
+  # Optional: a separate album per orientation (falls back to output_album_id)
+  # output_album_portrait_id: "album-id-for-portrait-crops"
+  # output_album_landscape_id: "album-id-for-landscape-crops"
 
 # Meural Canvas devices (optional)
 meural:
