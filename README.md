@@ -229,7 +229,11 @@ Open **Settings** (top right). On first start it opens by itself.
 3. Add your Meural Canvas devices (optional), pick your Canvas's **frame
    finish** (light wood, dark wood, black or white; used to draw the Review
    preview, light wood by default), and set the crop sizes to your Canvas's
-   resolution.
+   resolution. Tick **Upload crops at native resolution** to upload the cropped
+   pixels without resizing them to those sizes — the sizes then only set each
+   crop's aspect ratio. This gives the highest quality (files are larger), and
+   is worth it only if whatever displays the album can use more than the crop
+   sizes; the Meural Canvas II panel itself is 1920×1080.
 4. **Save**. Settings take effect immediately, without a restart, and choosing
    a different input album starts a sync.
 
@@ -252,6 +256,7 @@ from Settings rewrites the file, dropping any comments:
 dimensions:
   portrait_size: [1080, 1920]   # Width x Height
   landscape_size: [1920, 1080]  # Width x Height
+  native_resolution: false      # true uploads the cropped pixels without resizing
 
 # Immich server configuration
 immich:

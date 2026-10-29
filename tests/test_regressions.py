@@ -522,6 +522,34 @@ class CropRegressionTests(unittest.TestCase):
             self.files._update_entry(ASSET, lambda entry: entry['portrait']['uploaded'].pop('size'))
             self.assertEqual(self.image()['status'], 'completed')
 
+    def test_native_resolution_uploads_cropped_pixels_without_resizing(self):
+        from io import BytesIO
+        from PIL import Image
+        # A 16:9 landscape crop that is smaller than the configured landscape size.
+        crop = {'x': 0, 'y': 0, 'width': 80, 'height': 45}
+        self.assertTrue(self.files.save_crop(ASSET, 'landscape', crop))
+        with patch.dict(self.app.config.settings['dimensions'], {'native_resolution': True}):
+            with patch.object(self.app.immich_handler, 'upload_asset', return_value='uploaded') as upload:
+                response = self.client.post('/upload-single', json={'identifier': ASSET, 'orientation': 'landscape'})
+            self.assertEqual(response.status_code, 200, response.json)
+            self.assertEqual(Image.open(BytesIO(upload.call_args.args[0])).size, (80, 45))
+        # Fixed mode resizes the very same crop up to the configured landscape size.
+        with patch.object(self.app.immich_handler, 'upload_asset', return_value='uploaded') as upload:
+            self.client.post('/upload-single', json={'identifier': ASSET, 'orientation': 'landscape'})
+        self.assertEqual(Image.open(BytesIO(upload.call_args.args[0])).size, (160, 90))
+
+    def test_toggling_native_resolution_makes_uploaded_crops_pending(self):
+        self.save(False)
+        self.uploaded('portrait')
+        self.assertEqual(self.image()['status'], 'completed')
+        with patch.dict(self.app.config.settings['dimensions'], {'native_resolution': True}):
+            self.assertEqual(self.image()['status'], 'portrait')
+
+    def test_dimensions_report_native_resolution_flag(self):
+        self.assertFalse(self.client.get('/dimensions').json['native_resolution'])
+        with patch.dict(self.app.config.settings['dimensions'], {'native_resolution': True}):
+            self.assertTrue(self.client.get('/dimensions').json['native_resolution'])
+
     def test_corrupt_metadata_is_not_overwritten(self):
         path = Path(self.app.config.CROP_METADATA_FILE)
         path.parent.mkdir(exist_ok=True, parents=True)
@@ -880,6 +908,24 @@ class CropRegressionTests(unittest.TestCase):
         self.assertEqual(self.client.get('/dimensions').json['portrait'], {'width': 60, 'height': 160})
         self.assertEqual(self.client.get('/meural/devices').json['devices'], [{'name': 'Hall', 'ip': '10.0.0.5'}])
         self.assertNotIn('test-only', json.dumps(response.json))
+
+    def test_native_resolution_is_saved_applied_and_returned(self):
+        self.keep_settings()
+        payload = self.settings_payload()
+        payload['dimensions']['native_resolution'] = True
+        response = self.client.put('/settings', json=payload)
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertTrue(self.app.config.native_resolution())
+        self.assertTrue(self.client.get('/settings').json['settings']['dimensions']['native_resolution'])
+
+    def test_settings_reject_non_boolean_native_resolution(self):
+        self.keep_settings()
+        payload = self.settings_payload()
+        payload['dimensions']['native_resolution'] = 'yes'
+        response = self.client.put('/settings', json=payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('true or false', response.json['error'])
+        self.assertFalse(self.app.config.native_resolution())
 
     def test_split_output_albums_are_saved_applied_and_returned(self):
         import yaml

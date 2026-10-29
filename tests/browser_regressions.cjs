@@ -380,11 +380,13 @@ const second = '22222222-2222-4222-8222-222222222222';
         assert.equal(await page.evaluate(() => document.documentElement.dataset.frame), 'black');
         console.log('PASS: Settings loads albums, keeps the saved key, refuses it for a new URL and saves');
 
-        // Splitting output by orientation reveals two album selects and saves both.
+        // Reopening settings reloads albums from the (faked) server for the tests below.
         await page.route('**/settings/albums', route => route.fulfill({ json: { success: true, albums: [
             { id: 'source-album', name: 'Queue', assets: 2, shared: false },
             { id: 'output-album', name: 'Crops', assets: 0, shared: false },
             { id: 'new-output', name: 'Shared crops', assets: 1, shared: true }] } }));
+
+        // Splitting output by orientation reveals two album selects and saves both.
         await page.locator('#btn-settings').click();
         await page.waitForFunction(() => /Connected: 3 albums/.test(document.getElementById('settings-album-status').textContent));
         assert.equal(await field('split_output_albums').isChecked(), false);
@@ -407,6 +409,23 @@ const second = '22222222-2222-4222-8222-222222222222';
         assert.equal(await field('output_album_landscape_id').inputValue(), 'new-output');
         await field('close').click();
         console.log('PASS: Settings can split output into per-orientation albums');
+
+        // The native-resolution toggle persists, reports through /dimensions and reloads checked.
+        await page.locator('#btn-settings').click();
+        await page.waitForFunction(() => document.getElementById('settings-modal').style.display === 'flex');
+        assert.equal(await field('native_resolution').isChecked(), false);
+        await field('native_resolution').check();
+        await page.locator('[name="save"]').click();
+        // Saved crops exist, so toggling resolution asks to confirm the re-upload.
+        assert.match(await page.locator('.confirm-dialog').innerText(), /uploading again at the new resolution/);
+        await confirm();
+        await page.waitForFunction(() => document.getElementById('settings-modal').style.display === 'none');
+        assert.equal((await (await page.request.get(`${baseURL}/settings`)).json()).settings.dimensions.native_resolution, true);
+        assert.equal((await (await page.request.get(`${baseURL}/dimensions`)).json()).native_resolution, true);
+        await page.locator('#btn-settings').click();
+        await page.waitForFunction(() => document.getElementById('settings-native-resolution').checked);
+        await field('close').click();
+        console.log('PASS: Settings toggles native-resolution uploads');
 
         // Phones show the library, then the editor in its place, with a Library button back.
         const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });

@@ -2,6 +2,9 @@
 dimensions:
   portrait_size: [1080, 1920]  # width x height
   landscape_size: [1920, 1080]  # width x height
+  # Upload the cropped pixels as-is instead of resizing to the sizes above; the
+  # sizes then only set each crop's aspect ratio. Larger files, maximum quality.
+  native_resolution: false
 
 # Immich configuration
 immich:
